@@ -1,0 +1,122 @@
+export interface DatasetMeta {
+  id: string
+  name: string
+  sourceType: string
+  rowCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Dataset extends DatasetMeta {
+  columns: { title: string }[]
+  data: (string | number)[][]
+}
+
+export interface DashboardMeta {
+  id: string
+  name: string
+  datasetId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DashboardRecord extends DashboardMeta {
+  definition: object
+}
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  return res.json()
+}
+
+export interface ConnectionMeta {
+  id: string
+  name: string
+  type: string
+  config: { projectId?: string; clientEmail?: string; location?: string }
+  createdAt: string
+  updatedAt: string
+}
+
+export const connectionsApi = {
+  list: () => fetch('/api/connections').then(json<ConnectionMeta[]>),
+
+  create: (d: { name: string; type: 'bigquery'; credentials: string; location?: string }) =>
+    fetch('/api/connections', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<ConnectionMeta>),
+
+  remove: (id: string) => fetch(`/api/connections/${id}`, { method: 'DELETE' }),
+
+  test: (id: string) =>
+    fetch(`/api/connections/${id}/test`, { method: 'POST' }).then(json<{ ok: boolean; error?: string }>),
+
+  preview: (id: string, sql: string) =>
+    fetch(`/api/connections/${id}/preview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sql }),
+    }).then(json<{ columns: { title: string }[]; data: (string | number)[][] }>),
+
+  ingest: (id: string, sql: string, name: string) =>
+    fetch(`/api/connections/${id}/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sql, name }),
+    }).then(json<Dataset>),
+}
+
+export const datasetsApi = {
+  list: () =>
+    fetch('/api/datasets').then(json<DatasetMeta[]>),
+
+  get: (id: string) =>
+    fetch(`/api/datasets/${id}`).then(json<Dataset>),
+
+  create: (d: Pick<Dataset, 'name' | 'sourceType' | 'columns' | 'data'>) =>
+    fetch('/api/datasets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<Dataset>),
+
+  update: (id: string, d: Partial<Pick<Dataset, 'name' | 'columns' | 'data'>>) =>
+    fetch(`/api/datasets/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<Dataset>),
+
+  remove: (id: string) =>
+    fetch(`/api/datasets/${id}`, { method: 'DELETE' }),
+}
+
+export const dashboardsApi = {
+  list: () =>
+    fetch('/api/dashboards').then(json<DashboardMeta[]>),
+
+  get: (id: string) =>
+    fetch(`/api/dashboards/${id}`).then(json<DashboardRecord>),
+
+  create: (d: { name: string; definition: object; datasetId?: string | null }) =>
+    fetch('/api/dashboards', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<DashboardRecord>),
+
+  update: (id: string, d: Partial<{ name: string; definition: object; datasetId: string | null }>) =>
+    fetch(`/api/dashboards/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<DashboardRecord>),
+
+  remove: (id: string) =>
+    fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+}
