@@ -23,7 +23,7 @@ services:
       PORT: 3001
       CONNECTIONS_SECRET: ${CONNECTIONS_SECRET:-dev-insecure-secret}
     ports:
-      - "3001:3001"
+      - "3002:3001"
     depends_on:
       db:
         condition: service_healthy

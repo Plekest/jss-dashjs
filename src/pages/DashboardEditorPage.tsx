@@ -205,8 +205,10 @@ export function DashboardEditorPage() {
       </Box>
 
       {/* dashjs editor — key = id + mountKey ensures a clean re-mount
-          whenever the user switches the data source */}
-      <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+          whenever the user switches the data source.
+          isolation:isolate creates a stacking context so dashjs internal
+          z-indices don't compete with MUI portals (e.g. the Fonte dropdown). */}
+      <Box sx={{ flexGrow: 1, overflow: 'hidden', isolation: 'isolate' }}>
         <DashjsMount
           key={`${id ?? 'new'}-${mountKey}`}
           options={options}
