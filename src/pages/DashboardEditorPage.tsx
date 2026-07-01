@@ -144,7 +144,8 @@ export function DashboardEditorPage() {
         sx={{
           px: 2,
           py: 0.75,
-          borderBottom: '1px solid rgba(0,0,0,0.08)',
+          borderBottom: 1,
+          borderColor: 'divider',
           display: 'flex',
           alignItems: 'center',
           gap: 2,

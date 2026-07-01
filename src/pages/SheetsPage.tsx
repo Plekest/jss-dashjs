@@ -65,11 +65,13 @@ export function SheetsPage() {
       {/* Sidebar */}
       <Box
         sx={{
-          width: 220,
-          borderRight: '1px solid rgba(0,0,0,0.08)',
+          width: 260,
+          borderRight: '1px solid',
+          borderColor: 'divider',
           display: 'flex',
           flexDirection: 'column',
           flexShrink: 0,
+          bgcolor: 'background.default',
         }}
       >
         <Box sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -91,9 +93,13 @@ export function SheetsPage() {
                 selected={activeDatasetId === ds.id}
                 onClick={() => handleSelectDataset(ds.id)}
                 sx={{
+                  borderLeft: '3px solid',
+                  borderLeftColor: 'transparent',
                   '&.Mui-selected': {
-                    bgcolor: '#e8f0fe',
-                    color: '#1a73e8',
+                    borderLeftColor: 'primary.main',
+                    bgcolor: 'background.paper',
+                    color: 'text.primary',
+                    '&:hover': { bgcolor: 'background.paper' },
                   },
                 }}
               >
@@ -129,7 +135,8 @@ export function SheetsPage() {
             sx={{
               px: 2,
               py: 0.75,
-              borderBottom: '1px solid rgba(0,0,0,0.08)',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
               display: 'flex',
               alignItems: 'center',
               gap: 2,

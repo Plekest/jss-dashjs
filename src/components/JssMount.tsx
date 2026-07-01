@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
+import { useTheme } from '@mui/material/styles'
 import jspreadsheet from 'jspreadsheet'
 import 'jsuites/dist/jsuites.css'
 import 'jspreadsheet/dist/jspreadsheet.css'
+import { useColorMode } from '../theme/colorMode'
 
 interface Column {
   title: string
@@ -19,6 +21,8 @@ export function JssMount({ data, columns, onDataChange }: Props) {
   const worksheetsRef = useRef<ReturnType<typeof jspreadsheet> | null>(null)
   const onDataChangeRef = useRef(onDataChange)
   onDataChangeRef.current = onDataChange
+  const { mode } = useColorMode()
+  const theme = useTheme()
 
   useEffect(() => {
     const el = mountRef.current
@@ -68,11 +72,20 @@ export function JssMount({ data, columns, onDataChange }: Props) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // position:absolute + inset:0 gives reliable pixel dimensions regardless of
-  // how the parent computes its height via flexbox.
+  // how the parent computes its height via flexbox. The dark-mode class lives
+  // on this wrapper (not the mount div) because jspreadsheet mutates the
+  // mount div's classList imperatively (adds "jss_container"); if React also
+  // owned that div's className, toggling the theme would wipe those classes.
   return (
     <div
-      ref={mountRef}
-      style={{ position: 'absolute', inset: 0 }}
-    />
+      className={mode === 'dark' ? 'lm-dark-mode' : undefined}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        backgroundColor: mode === 'dark' ? theme.palette.background.default : undefined,
+      }}
+    >
+      <div ref={mountRef} style={{ position: 'absolute', inset: 0 }} />
+    </div>
   )
 }

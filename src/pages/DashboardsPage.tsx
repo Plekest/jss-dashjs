@@ -112,10 +112,19 @@ export function DashboardsPage() {
         <Grid container spacing={2}>
           {dashboards.map((d) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={d.id}>
-              <Card variant="outlined" sx={{ position: 'relative', '&:hover': { boxShadow: 3 } }}>
+              <Card
+                sx={{
+                  position: 'relative',
+                  transition: 'box-shadow .15s ease, transform .15s ease',
+                  '&:hover': {
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.06), 0 16px 32px -16px rgba(0,0,0,0.14)',
+                    transform: 'translateY(-2px)',
+                  },
+                }}
+              >
                 <CardActionArea onClick={() => navigate(`/dashboards/${d.id}`)}>
                   <CardContent>
-                    <DashboardIcon sx={{ color: '#1a73e8', mb: 1, fontSize: 32 }} />
+                    <DashboardIcon sx={{ color: 'primary.main', mb: 1, fontSize: 32 }} />
                     <Typography variant="subtitle1" fontWeight={600} noWrap>
                       {d.name}
                     </Typography>

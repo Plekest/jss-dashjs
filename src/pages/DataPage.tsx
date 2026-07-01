@@ -1,20 +1,14 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
   CircularProgress,
-  IconButton,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Tooltip,
   Typography,
 } from '@mui/material'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import StorageIcon from '@mui/icons-material/Storage'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import { useDatasetsStore } from '../stores/datasetsStore'
@@ -31,11 +25,48 @@ function formatRows(n: number) {
 }
 
 export function DataPage() {
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { datasets, loading, createDataset, removeDataset, refresh } = useDatasetsStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [bqDialogOpen, setBqDialogOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Tracks a select param mid-flight: setSelectedId and setSearchParams don't
+  // land in the same commit (react-router dispatches its own re-render), so
+  // the fallback-to-first-item check below must wait for selectedId to
+  // actually catch up before running, or it clobbers the pending selection.
+  const pendingSelectRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!datasets.length) {
+      setSelectedId(null)
+      return
+    }
+    const selectParam = searchParams.get('select')
+    if (selectParam && datasets.some((d) => d.id === selectParam)) {
+      pendingSelectRef.current = selectParam
+      setSelectedId(selectParam)
+      setSearchParams(
+        (params) => {
+          params.delete('select')
+          return params
+        },
+        { replace: true },
+      )
+      return
+    }
+    if (pendingSelectRef.current && pendingSelectRef.current !== selectedId) {
+      return
+    }
+    pendingSelectRef.current = null
+    if (!selectedId || !datasets.some((d) => d.id === selectedId)) {
+      setSelectedId(datasets[0].id)
+    }
+  }, [datasets, selectedId, searchParams, setSearchParams])
+
+  const selected = datasets.find((d) => d.id === selectedId) ?? null
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -65,8 +96,8 @@ export function DataPage() {
   }
 
   return (
-    <Box sx={{ p: 3, height: '100%', overflow: 'auto' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+    <Box sx={{ p: 3, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
           Data
         </Typography>
@@ -137,71 +168,103 @@ export function DataPage() {
           </Button>
         </Box>
       ) : (
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ '& th': { fontWeight: 600, color: 'text.secondary', fontSize: 12 } }}>
-                <TableCell>NOME</TableCell>
-                <TableCell>TIPO</TableCell>
-                <TableCell align="right">LINHAS</TableCell>
-                <TableCell>ATUALIZADO</TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {datasets.map((ds) => (
-                <TableRow
+        <Box
+          sx={{
+            flexGrow: 1,
+            minHeight: 0,
+            display: 'flex',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 2,
+            overflow: 'hidden',
+          }}
+        >
+          {/* List */}
+          <Box
+            sx={{
+              width: 260,
+              flexShrink: 0,
+              borderRight: '1px solid',
+              borderColor: 'divider',
+              overflow: 'auto',
+              bgcolor: 'background.default',
+            }}
+          >
+            {datasets.map((ds) => {
+              const active = ds.id === selectedId
+              return (
+                <Box
                   key={ds.id}
-                  hover
-                  sx={{ '&:last-child td': { border: 0 } }}
+                  onClick={() => setSelectedId(ds.id)}
+                  sx={{
+                    px: 2,
+                    py: 1.25,
+                    cursor: 'pointer',
+                    borderLeft: '3px solid',
+                    borderLeftColor: active ? 'primary.main' : 'transparent',
+                    bgcolor: active ? 'background.paper' : 'transparent',
+                    '&:hover': { bgcolor: 'background.paper' },
+                  }}
                 >
-                  <TableCell>
-                    <Typography variant="body2" fontWeight={500}>
-                      {ds.name}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box
-                      component="span"
-                      sx={{
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: 1,
-                        bgcolor: 'action.hover',
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {ds.sourceType}
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Typography variant="body2" color="text.secondary">
-                      {formatRows(ds.rowCount)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="caption" color="text.secondary">
-                      {formatDate(ds.updatedAt)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="Remover dataset">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDelete(ds.id, ds.name)}
-                        sx={{ color: 'text.disabled', '&:hover': { color: 'error.main' } }}
-                      >
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                  <Typography variant="body2" noWrap fontWeight={active ? 600 : 500}>
+                    {ds.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
+                    {ds.sourceType}
+                  </Typography>
+                </Box>
+              )
+            })}
+          </Box>
+
+          {/* Detail */}
+          {selected && (
+            <Box sx={{ flexGrow: 1, p: 3, overflow: 'auto', bgcolor: 'background.paper' }}>
+              <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>
+                {selected.name}
+              </Typography>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: '140px 1fr',
+                  rowGap: 1.25,
+                  columnGap: 2,
+                  mb: 3,
+                  maxWidth: 480,
+                }}
+              >
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                  Tipo
+                </Typography>
+                <Typography variant="body2">{selected.sourceType.toUpperCase()}</Typography>
+
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                  Linhas
+                </Typography>
+                <Typography variant="body2">{formatRows(selected.rowCount)}</Typography>
+
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                  Atualizado
+                </Typography>
+                <Typography variant="body2">{formatDate(selected.updatedAt)}</Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button variant="outlined" startIcon={<OpenInNewIcon />} onClick={() => navigate('/sheets')}>
+                  Abrir em Planilhas
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteOutlineIcon />}
+                  onClick={() => handleDelete(selected.id, selected.name)}
+                >
+                  Remover
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </Box>
       )}
     </Box>
   )

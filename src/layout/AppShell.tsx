@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   AppBar,
@@ -9,19 +9,22 @@ import {
   ListItem,
   ListItemButton,
   ListItemIcon,
-  ListItemText,
   Toolbar,
   Tooltip,
   Typography,
 } from '@mui/material'
-import MenuIcon from '@mui/icons-material/Menu'
 import TableChartIcon from '@mui/icons-material/TableChart'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import AnalyticsIcon from '@mui/icons-material/Analytics'
 import StorageIcon from '@mui/icons-material/Storage'
 import CableIcon from '@mui/icons-material/Cable'
+import Brightness4Icon from '@mui/icons-material/Brightness4'
+import Brightness7Icon from '@mui/icons-material/Brightness7'
+import SearchIcon from '@mui/icons-material/Search'
+import { useColorMode } from '../theme/colorMode'
+import { CommandPalette } from '../components/CommandPalette'
 
-const DRAWER_WIDTH = 220
+const RAIL_WIDTH = 64
 
 const navItems = [
   { label: 'Data', path: '/data', icon: <StorageIcon /> },
@@ -31,68 +34,82 @@ const navItems = [
 ]
 
 export function AppShell() {
-  const [drawerOpen, setDrawerOpen] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
+  const { mode, toggle } = useColorMode()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        const target = e.target as HTMLElement | null
+        if (target?.closest('[data-command-palette-input]')) return
+        e.preventDefault()
+        setPaletteOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
-      <AppBar
-        position="fixed"
-        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, bgcolor: '#1a73e8' }}
-      >
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
         <Toolbar variant="dense">
-          <IconButton
-            color="inherit"
-            edge="start"
-            onClick={() => setDrawerOpen((o) => !o)}
-            sx={{ mr: 2 }}
-          >
-            <MenuIcon />
-          </IconButton>
-          <AnalyticsIcon sx={{ mr: 1 }} />
-          <Typography variant="h6" noWrap sx={{ fontWeight: 600, letterSpacing: '-0.5px' }}>
+          <AnalyticsIcon sx={{ mr: 1.5, color: 'primary.main' }} />
+          <Typography variant="h6" noWrap sx={{ fontWeight: 700, letterSpacing: '-0.02em' }}>
             JSS Analytics
           </Typography>
+          <Box sx={{ flexGrow: 1 }} />
+          <Tooltip title="Buscar (⌘K)">
+            <IconButton onClick={() => setPaletteOpen(true)} size="small" sx={{ mr: 0.5 }}>
+              <SearchIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={mode === 'light' ? 'Ativar tema escuro' : 'Ativar tema claro'}>
+            <IconButton onClick={toggle} size="small">
+              {mode === 'light' ? <Brightness4Icon fontSize="small" /> : <Brightness7Icon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 
       <Drawer
-        variant="persistent"
-        open={drawerOpen}
+        variant="permanent"
         sx={{
-          width: drawerOpen ? DRAWER_WIDTH : 0,
+          width: RAIL_WIDTH,
           flexShrink: 0,
-          transition: 'width 0.2s',
           '& .MuiDrawer-paper': {
-            width: DRAWER_WIDTH,
+            width: RAIL_WIDTH,
             boxSizing: 'border-box',
             top: '48px',
             height: 'calc(100% - 48px)',
+            alignItems: 'center',
           },
         }}
       >
-        <List dense sx={{ pt: 1 }}>
+        <List sx={{ pt: 1.5, width: '100%' }}>
           {navItems.map((item) => {
             const active = location.pathname.startsWith(item.path)
             return (
-              <ListItem key={item.path} disablePadding>
-                <Tooltip title={drawerOpen ? '' : item.label} placement="right">
+              <ListItem key={item.path} disablePadding sx={{ justifyContent: 'center', mb: 0.5 }}>
+                <Tooltip title={item.label} placement="right">
                   <ListItemButton
                     selected={active}
                     onClick={() => navigate(item.path)}
                     sx={{
-                      borderRadius: '0 24px 24px 0',
+                      borderRadius: 2,
                       mx: 1,
+                      minHeight: 44,
+                      justifyContent: 'center',
                       '&.Mui-selected': {
-                        bgcolor: '#e8f0fe',
-                        color: '#1a73e8',
-                        '& .MuiListItemIcon-root': { color: '#1a73e8' },
+                        bgcolor: 'rgba(189, 91, 61, 0.1)',
+                        '& .MuiListItemIcon-root': { color: 'primary.main' },
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.label} />
+                    <ListItemIcon sx={{ minWidth: 0, color: 'text.secondary' }}>{item.icon}</ListItemIcon>
                   </ListItemButton>
                 </Tooltip>
               </ListItem>

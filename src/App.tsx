@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { ThemeProvider, CssBaseline } from '@mui/material'
-import { theme } from './theme'
+import { createAppTheme } from './theme'
+import { ColorModeProvider, useColorMode } from './theme/colorMode'
 import { AppShell } from './layout/AppShell'
 import { DataPage } from './pages/DataPage'
 import { SheetsPage } from './pages/SheetsPage'
@@ -9,7 +11,10 @@ import { DashboardEditorPage } from './pages/DashboardEditorPage'
 import { DatasetsProvider } from './stores/datasetsStore'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 
-export function App() {
+function ThemedApp() {
+  const { mode } = useColorMode()
+  const theme = useMemo(() => createAppTheme(mode), [mode])
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -28,5 +33,13 @@ export function App() {
         </BrowserRouter>
       </DatasetsProvider>
     </ThemeProvider>
+  )
+}
+
+export function App() {
+  return (
+    <ColorModeProvider>
+      <ThemedApp />
+    </ColorModeProvider>
   )
 }
