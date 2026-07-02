@@ -15,7 +15,7 @@ interface DatasetsState {
   loading: boolean
   refresh: () => Promise<void>
   createDataset: (payload: Pick<Dataset, 'name' | 'sourceType' | 'columns' | 'data'>) => Promise<Dataset>
-  updateDataset: (id: string, patch: Partial<Pick<Dataset, 'name' | 'columns' | 'data'>>) => Promise<Dataset>
+  updateDataset: (id: string, patch: Partial<Pick<Dataset, 'name' | 'columns' | 'data' | 'meta'>>) => Promise<Dataset>
   removeDataset: (id: string) => Promise<void>
   setActiveDataset: (id: string | null) => Promise<void>
 }
@@ -52,7 +52,7 @@ export function DatasetsProvider({ children }: { children: ReactNode }) {
   )
 
   const updateDataset = useCallback(
-    async (id: string, patch: Partial<Pick<Dataset, 'name' | 'columns' | 'data'>>) => {
+    async (id: string, patch: Partial<Pick<Dataset, 'name' | 'columns' | 'data' | 'meta'>>) => {
       const updated = await datasetsApi.update(id, patch)
       await refresh()
       // Keep activeDataset in sync

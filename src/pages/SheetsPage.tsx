@@ -18,21 +18,26 @@ import StorageIcon from '@mui/icons-material/Storage'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import { JssMount } from '../components/JssMount'
 import { useDatasetsStore } from '../stores/datasetsStore'
+import { hasProLicense } from '../lib/license'
+import type { DatasetWorksheet } from '../lib/api'
 
 export function SheetsPage() {
   const navigate = useNavigate()
   const { datasets, activeDataset, activeDatasetId, setActiveDataset, updateDataset, loading } =
     useDatasetsStore()
 
-  // Local pending state — only flushed to DB on explicit Save
+  // Local pending state — only flushed to DB on explicit Save.
+  // Simple mode uses pendingData; pro mode uses pendingWorksheets (all tabs).
   const [pendingData, setPendingData] = useState<(string | number)[][] | null>(null)
+  const [pendingWorksheets, setPendingWorksheets] = useState<DatasetWorksheet[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const isDirty = pendingData !== null
+  const isDirty = hasProLicense ? pendingWorksheets !== null : pendingData !== null
 
   async function handleSelectDataset(id: string) {
     setPendingData(null)
+    setPendingWorksheets(null)
     setSaved(false)
     await setActiveDataset(id)
   }
@@ -42,15 +47,32 @@ export function SheetsPage() {
     setSaved(false)
   }, [])
 
+  const handleWorksheetsChange = useCallback((sheets: DatasetWorksheet[]) => {
+    setPendingWorksheets(sheets)
+    setSaved(false)
+  }, [])
+
   async function handleSave() {
-    if (!activeDataset || pendingData === null) return
+    if (!activeDataset) return
     setSaving(true)
     try {
-      await updateDataset(activeDataset.id, {
-        columns: activeDataset.columns,
-        data: pendingData,
-      })
-      setPendingData(null)
+      if (hasProLicense) {
+        if (pendingWorksheets === null) return
+        const first = pendingWorksheets[0]
+        await updateDataset(activeDataset.id, {
+          columns: first?.columns ?? activeDataset.columns,
+          data: first?.data ?? [],
+          meta: { worksheets: pendingWorksheets },
+        })
+        setPendingWorksheets(null)
+      } else {
+        if (pendingData === null) return
+        await updateDataset(activeDataset.id, {
+          columns: activeDataset.columns,
+          data: pendingData,
+        })
+        setPendingData(null)
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } finally {
@@ -199,12 +221,22 @@ export function SheetsPage() {
           </Box>
         ) : (
           <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', position: 'relative', p: 0 }}>
-            <JssMount
-              key={activeDataset.id}
-              data={displayData}
-              columns={activeDataset.columns}
-              onDataChange={handleDataChange}
-            />
+            {hasProLicense ? (
+              <JssMount
+                key={activeDataset.id}
+                worksheets={pendingWorksheets ?? activeDataset.meta?.worksheets}
+                data={activeDataset.data}
+                columns={activeDataset.columns}
+                onWorksheetsChange={handleWorksheetsChange}
+              />
+            ) : (
+              <JssMount
+                key={activeDataset.id}
+                data={displayData}
+                columns={activeDataset.columns}
+                onDataChange={handleDataChange}
+              />
+            )}
           </Box>
         )}
       </Box>

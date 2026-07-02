@@ -6,10 +6,19 @@ CREATE TABLE IF NOT EXISTS datasets (
   source_type text NOT NULL,
   columns     jsonb NOT NULL DEFAULT '[]',
   data        jsonb NOT NULL DEFAULT '[]',
+  -- Pro-mode only: raw formulas + multi-tab layout, so the rich /sheets
+  -- editor can reopen with fórmulas intact. `columns`/`data` above always
+  -- hold the first worksheet's calculated values (dashboards keep reading
+  -- them exactly as before, licensed or not).
+  meta        jsonb NOT NULL DEFAULT '{}',
   row_count   integer NOT NULL DEFAULT 0,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Idempotent: also applies the column to a database created before this
+-- field existed (docker-entrypoint-initdb.d only runs init.sql once).
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS meta jsonb NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS dashboards (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

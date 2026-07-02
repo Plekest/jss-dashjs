@@ -30,7 +30,7 @@ router.post('/', async (req, res) => {
 
 // Update dataset (full rewrite — used by "Salvar" in Planilhas)
 router.put('/:id', async (req, res) => {
-  const { name, columns, data } = req.body
+  const { name, columns, data, meta } = req.body
   const updates: string[] = []
   const values: unknown[] = []
   let i = 1
@@ -41,6 +41,7 @@ router.put('/:id', async (req, res) => {
     updates.push(`data = $${i++}`); values.push(JSON.stringify(data))
     updates.push(`row_count = $${i++}`); values.push((data as unknown[]).length)
   }
+  if (meta !== undefined) { updates.push(`meta = $${i++}`); values.push(JSON.stringify(meta)) }
   updates.push(`updated_at = now()`)
 
   if (!updates.length) return res.status(400).json({ error: 'nothing to update' })
@@ -67,6 +68,7 @@ export function toCamel(row: Record<string, unknown>) {
     sourceType: row.source_type,
     columns: row.columns,
     data: row.data,
+    meta: row.meta ?? {},
     rowCount: row.row_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

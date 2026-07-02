@@ -1,8 +1,34 @@
-import type { DashJsDataSource, DataField, ChartDataSeries, DashboardChartRecord, DashboardFilter } from 'dashjs'
+// buildDataSource — adapts a host dataset (columns + data matrix) to the
+// DashJsDataSource contract.
+//
+// Field-id contract: every hook keys fields positionally as `col_N`.
+//  - listFields()   → ids col_0..col_N (names = column titles)
+//  - getChartData() → resolves dimension/metric slot ids `col_N`
+//  - getRawRows()   → rows keyed by `col_N` (values stringified) for the
+//    active dataset only
+//  - getSourceRows(id) → same shape, for ANY dataset by id (Blend builder)
+// dashjs evaluates calculated fields client-side against getRawRows(), so
+// calc formulas over host data reference `[col_N]` tokens — the calc editor
+// inserts field ids, keeping formulas consistent with this contract.
+
+import type { DashJsDataSource, DataField, ChartDataSeries, DashboardChartRecord, DashboardFilter, NamedSourceMeta } from 'dashjs'
+import { datasetsApi, type Dataset } from './api'
 
 export interface DatasetLike {
   columns: { title: string }[]
   data: (string | number)[][]
+}
+
+/** Converts any host dataset's columns/data into the col_N-keyed row shape
+ *  dashjs expects from getRawRows/getSourceRows. */
+function datasetToRows(ds: Pick<Dataset, 'columns' | 'data'>): Record<string, string>[] {
+  return ds.data.map((row) => {
+    const rec: Record<string, string> = {}
+    ds.columns.forEach((_col, i) => {
+      rec[`col_${i}`] = String(row[i] ?? '')
+    })
+    return rec
+  })
 }
 
 function guessFieldType(data: (string | number)[][], colIndex: number): DataField['type'] {
@@ -77,6 +103,24 @@ export function buildDataSource(source: DatasetLike | null): DashJsDataSource {
         config?.slots?.['metric']?.fieldId ??
         'col_1'
       return aggregateSheetData(source, dimensionId, metricId, filters)
+    },
+
+    // Raw rows keyed by col_N (same ids as listFields) — enables dashjs to
+    // evaluate calculated fields client-side over host data.
+    getRawRows: (): Record<string, string>[] => (source ? datasetToRows(source) : []),
+
+    // Every dataset the host has — independent of `source` (the dashboard's
+    // own active dataset) — so the Blend builder can offer them all.
+    listSources: async (): Promise<NamedSourceMeta[]> => {
+      const metas = await datasetsApi.list()
+      return metas.map((m) => ({ id: m.id, label: m.name }))
+    },
+
+    // Row data for any dataset by id, fetched on demand when the user picks
+    // it in the Blend builder (dashjs caches the result afterwards).
+    getSourceRows: async (id: string): Promise<Record<string, string>[]> => {
+      const ds = await datasetsApi.get(id)
+      return datasetToRows(ds)
     },
   }
 }

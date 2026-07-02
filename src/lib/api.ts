@@ -7,9 +7,28 @@ export interface DatasetMeta {
   updatedAt: string
 }
 
+/** One tab of the rich /sheets editor (pro mode only). `data` holds the
+ *  calculated values (getData(true)); `formulas` holds the raw formulas
+ *  (getData(false)) so the tab can reopen with fórmulas editable. */
+export interface DatasetWorksheet {
+  name: string
+  columns: { title: string }[]
+  data: (string | number)[][]
+  formulas?: (string | number)[][]
+}
+
+/** Pro-mode-only persistence: multi-tab layout with raw formulas. Absent or
+ *  empty in simple mode. `columns`/`data` on Dataset always mirror the first
+ *  worksheet's calculated values, so hosts that only read those never see a
+ *  difference. */
+export interface DatasetMetaPayload {
+  worksheets?: DatasetWorksheet[]
+}
+
 export interface Dataset extends DatasetMeta {
   columns: { title: string }[]
   data: (string | number)[][]
+  meta?: DatasetMetaPayload
 }
 
 export interface DashboardMeta {
@@ -85,7 +104,7 @@ export const datasetsApi = {
       body: JSON.stringify(d),
     }).then(json<Dataset>),
 
-  update: (id: string, d: Partial<Pick<Dataset, 'name' | 'columns' | 'data'>>) =>
+  update: (id: string, d: Partial<Pick<Dataset, 'name' | 'columns' | 'data' | 'meta'>>) =>
     fetch(`/api/datasets/${id}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

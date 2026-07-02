@@ -16,6 +16,7 @@ import { DashjsMount } from '../components/DashjsMount'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
 import { loadDashboard, createEmptyDashboard } from '../lib/dashboardsStorage'
+import { licenseKey } from '../lib/license'
 import { dashboardsApi, datasetsApi, type Dataset } from '../lib/api'
 import type { DashJsOptions, DashboardFull } from 'dashjs'
 import { GA4_COMING_SOON } from '../connectors/ga4Connector'
@@ -101,6 +102,9 @@ export function DashboardEditorPage() {
       dashboard: dashboard ?? createEmptyDashboard('Sem título'),
       dataSource,
       onSave: stableOnSave,
+      // dashjs bundles its own formula-pro; pass the key so its engine is
+      // licensed too. undefined = degraded mode, same as today.
+      license: licenseKey,
     }),
     // Re-create only when dashboard changes (e.g. on initial load).
     // eslint-disable-next-line react-hooks/exhaustive-deps
