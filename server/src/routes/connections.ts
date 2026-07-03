@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
-import { encrypt, decrypt } from '../crypto.js'
-import { runQuery } from '../bigquery.js'
+import { encrypt } from '../crypto.js'
+import { runQuery } from '../queryEngine.js'
 import { insertDataset } from './datasets.js'
 
 const router = Router()
@@ -33,24 +33,39 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'name, type, credentials are required' })
     }
 
-    let saJson: Record<string, unknown>
-    try {
-      saJson = typeof credentials === 'string' ? JSON.parse(credentials) : credentials
-    } catch {
-      return res.status(400).json({ error: 'credentials must be valid JSON' })
+    let config: Record<string, unknown>
+    let credsToEncrypt: string
+
+    if (type === 'bigquery') {
+      let saJson: Record<string, unknown>
+      try {
+        saJson = typeof credentials === 'string' ? JSON.parse(credentials) : credentials
+      } catch {
+        return res.status(400).json({ error: 'credentials must be valid JSON' })
+      }
+
+      if (!saJson.project_id || !saJson.client_email || !saJson.private_key) {
+        return res.status(400).json({ error: 'credentials must contain project_id, client_email, private_key' })
+      }
+
+      config = {
+        projectId: saJson.project_id,
+        clientEmail: saJson.client_email,
+        ...(location ? { location } : {}),
+      }
+      credsToEncrypt = JSON.stringify(saJson)
+    } else if (type === 'postgres') {
+      const { host, port, user, password, database, ssl } = credentials as Record<string, unknown>
+      if (!host || !user || !database) {
+        return res.status(400).json({ error: 'credentials must contain host, user, database' })
+      }
+      config = { host, port: port ?? 5432, database, ssl: !!ssl }
+      credsToEncrypt = JSON.stringify({ host, port: port ?? 5432, user, password, database, ssl: !!ssl })
+    } else {
+      return res.status(400).json({ error: `unsupported connection type: ${type}` })
     }
 
-    if (!saJson.project_id || !saJson.client_email || !saJson.private_key) {
-      return res.status(400).json({ error: 'credentials must contain project_id, client_email, private_key' })
-    }
-
-    const config = {
-      projectId: saJson.project_id,
-      clientEmail: saJson.client_email,
-      ...(location ? { location } : {}),
-    }
-
-    const encryptedCreds = encrypt(JSON.stringify(saJson))
+    const encryptedCreds = encrypt(credsToEncrypt)
 
     const { rows } = await pool.query(
       `INSERT INTO connections (name, type, config, credentials)
@@ -97,11 +112,17 @@ router.post('/:id/preview', async (req, res) => {
 
 // Ingest query → dataset (50k rows)
 router.post('/:id/ingest', async (req, res) => {
-  const { sql, name } = req.body
+  const { sql, name, refreshIntervalMinutes } = req.body
   if (!sql || !name) return res.status(400).json({ error: 'sql and name are required' })
   try {
     const { columns, data } = await runQuery(req.params.id, sql, 50_000)
-    const dataset = await insertDataset(name, 'bigquery', columns, data)
+    const { rows: connRows } = await pool.query('SELECT type FROM connections WHERE id=$1', [req.params.id])
+    const connType = connRows[0]?.type ?? 'unknown'
+    const dataset = await insertDataset(name, connType, columns, data, {
+      connectionId: req.params.id,
+      sourceSql: sql,
+      refreshIntervalMinutes: refreshIntervalMinutes ?? null,
+    })
     res.status(201).json(dataset)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

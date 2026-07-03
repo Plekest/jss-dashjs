@@ -3,7 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
+  Chip,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Typography,
 } from '@mui/material'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
@@ -11,9 +16,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import StorageIcon from '@mui/icons-material/Storage'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { parseFile } from '../lib/parseFile'
-import { ImportBigQueryDialog } from '../components/ImportBigQueryDialog'
+import { ImportSqlDialog } from '../components/ImportSqlDialog'
+import { datasetsApi } from '../lib/api'
 
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -27,12 +34,14 @@ function formatRows(n: number) {
 export function DataPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { datasets, loading, createDataset, removeDataset, refresh } = useDatasetsStore()
+  const { datasets, loading, createDataset, removeDataset, refresh, setActiveDataset } = useDatasetsStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [bqDialogOpen, setBqDialogOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [refreshingNow, setRefreshingNow] = useState(false)
+  const [savingInterval, setSavingInterval] = useState(false)
   // Tracks a select param mid-flight: setSelectedId and setSearchParams don't
   // land in the same commit (react-router dispatches its own re-render), so
   // the fallback-to-first-item check below must wait for selectedId to
@@ -95,6 +104,26 @@ export function DataPage() {
     await refresh()
   }
 
+  async function handleRefreshNow(id: string) {
+    setRefreshingNow(true)
+    try {
+      await datasetsApi.refreshNow(id)
+      await refresh()
+    } finally {
+      setRefreshingNow(false)
+    }
+  }
+
+  async function handleRefreshIntervalChange(id: string, minutes: number | null) {
+    setSavingInterval(true)
+    try {
+      await datasetsApi.updateRefreshSchedule(id, minutes)
+      await refresh()
+    } finally {
+      setSavingInterval(false)
+    }
+  }
+
   return (
     <Box sx={{ p: 3, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
@@ -114,7 +143,7 @@ export function DataPage() {
           onClick={() => setBqDialogOpen(true)}
           sx={{ mr: 1 }}
         >
-          Importar do BigQuery
+          Importar via SQL
         </Button>
         <Button
           variant="contained"
@@ -126,7 +155,7 @@ export function DataPage() {
         </Button>
       </Box>
 
-      <ImportBigQueryDialog open={bqDialogOpen} onClose={() => setBqDialogOpen(false)} />
+      <ImportSqlDialog open={bqDialogOpen} onClose={() => setBqDialogOpen(false)} />
 
       {error && (
         <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fce8e6', borderRadius: 1 }}>
@@ -249,8 +278,58 @@ export function DataPage() {
                 <Typography variant="body2">{formatDate(selected.updatedAt)}</Typography>
               </Box>
 
+              {selected.connectionId && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3, maxWidth: 480 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {selected.lastRefreshError ? (
+                      <Chip size="small" color="error" label={`Erro: ${selected.lastRefreshError}`} />
+                    ) : selected.lastRefreshedAt ? (
+                      <Chip size="small" color="success" label={`Atualizado às ${formatDate(selected.lastRefreshedAt)}`} />
+                    ) : (
+                      <Chip size="small" label="Nunca atualizado automaticamente" />
+                    )}
+                    <Button
+                      size="small"
+                      startIcon={refreshingNow ? <CircularProgress size={14} /> : <RefreshIcon />}
+                      onClick={() => handleRefreshNow(selected.id)}
+                      disabled={refreshingNow}
+                    >
+                      Atualizar agora
+                    </Button>
+                  </Box>
+
+                  <FormControl size="small" sx={{ maxWidth: 240 }}>
+                    <InputLabel>Atualizar automaticamente</InputLabel>
+                    <Select
+                      label="Atualizar automaticamente"
+                      value={selected.refreshIntervalMinutes ?? ''}
+                      disabled={savingInterval}
+                      onChange={(e) =>
+                        handleRefreshIntervalChange(selected.id, e.target.value === '' ? null : Number(e.target.value))
+                      }
+                    >
+                      <MenuItem value="">Nunca</MenuItem>
+                      <MenuItem value={15}>15 min</MenuItem>
+                      <MenuItem value={60}>1 hora</MenuItem>
+                      <MenuItem value={360}>6 horas</MenuItem>
+                      <MenuItem value={1440}>24 horas</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
+
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button variant="outlined" startIcon={<OpenInNewIcon />} onClick={() => navigate('/sheets')}>
+                <Button
+                  variant="outlined"
+                  startIcon={<OpenInNewIcon />}
+                  onClick={() => {
+                    // SheetsPage reads the dataset to show from the store's
+                    // activeDataset, not the URL — without this it lands on
+                    // /sheets with whatever was active before (or nothing).
+                    setActiveDataset(selected.id)
+                    navigate('/sheets')
+                  }}
+                >
                   Abrir em Planilhas
                 </Button>
                 <Button

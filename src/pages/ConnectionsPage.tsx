@@ -3,11 +3,17 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
+  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
+  MenuItem,
+  Select,
   TextField,
   Typography,
 } from '@mui/material'
@@ -29,7 +35,18 @@ export function ConnectionsPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', credentials: '', location: '' })
+  const [form, setForm] = useState({
+    name: '',
+    type: 'bigquery' as 'bigquery' | 'postgres',
+    credentials: '',
+    location: '',
+    host: '',
+    port: '5432',
+    user: '',
+    password: '',
+    database: '',
+    ssl: false,
+  })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -96,22 +113,60 @@ export function ConnectionsPage() {
     e.target.value = ''
   }
 
+  function resetForm() {
+    setForm({
+      name: '',
+      type: 'bigquery',
+      credentials: '',
+      location: '',
+      host: '',
+      port: '5432',
+      user: '',
+      password: '',
+      database: '',
+      ssl: false,
+    })
+  }
+
   async function handleCreate() {
-    if (!form.name.trim() || !form.credentials.trim()) {
-      setSaveError('Nome e credenciais são obrigatórios')
+    if (!form.name.trim()) {
+      setSaveError('Nome é obrigatório')
+      return
+    }
+    if (form.type === 'bigquery' && !form.credentials.trim()) {
+      setSaveError('Credenciais são obrigatórias')
+      return
+    }
+    if (form.type === 'postgres' && (!form.host.trim() || !form.user.trim() || !form.database.trim())) {
+      setSaveError('Host, usuário e database são obrigatórios')
       return
     }
     setSaving(true)
     setSaveError(null)
     try {
-      await connectionsApi.create({
-        name: form.name.trim(),
-        type: 'bigquery',
-        credentials: form.credentials,
-        ...(form.location.trim() ? { location: form.location.trim() } : {}),
-      })
+      if (form.type === 'bigquery') {
+        await connectionsApi.create({
+          name: form.name.trim(),
+          type: 'bigquery',
+          credentials: form.credentials,
+          ...(form.location.trim() ? { location: form.location.trim() } : {}),
+        })
+      } else {
+        await connectionsApi.create({
+          name: form.name.trim(),
+          type: 'postgres',
+          credentials: {
+            host: form.host.trim(),
+            port: Number(form.port) || 5432,
+            user: form.user.trim(),
+            password: form.password,
+            database: form.database.trim(),
+            ssl: form.ssl,
+          },
+        })
+      }
       setDialogOpen(false)
-      setForm({ name: '', credentials: '', location: '' })
+      resetForm()
       await load()
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Erro ao criar conexão')
@@ -225,7 +280,7 @@ export function ConnectionsPage() {
                       {conn.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
-                      {conn.config.projectId ?? '—'}
+                      {String(conn.type === 'postgres' ? conn.config.database ?? '—' : conn.config.projectId ?? '—')}
                     </Typography>
                   </Box>
                 </Box>
@@ -254,15 +309,31 @@ export function ConnectionsPage() {
                 </Typography>
                 <Typography variant="body2">{selected.type}</Typography>
 
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                  Projeto
-                </Typography>
-                <Typography variant="body2">{selected.config.projectId ?? '—'}</Typography>
+                {selected.type === 'postgres' ? (
+                  <>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Host
+                    </Typography>
+                    <Typography variant="body2">{String(selected.config.host ?? '—')}</Typography>
 
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                  Conta de serviço
-                </Typography>
-                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{selected.config.clientEmail ?? '—'}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Database
+                    </Typography>
+                    <Typography variant="body2">{String(selected.config.database ?? '—')}</Typography>
+                  </>
+                ) : (
+                  <>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Projeto
+                    </Typography>
+                    <Typography variant="body2">{String(selected.config.projectId ?? '—')}</Typography>
+
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Conta de serviço
+                    </Typography>
+                    <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{String(selected.config.clientEmail ?? '—')}</Typography>
+                  </>
+                )}
 
                 <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
                   Atualizado
@@ -308,8 +379,19 @@ export function ConnectionsPage() {
 
       {/* New connection dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Nova conexão BigQuery</DialogTitle>
+        <DialogTitle>Nova conexão</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Tipo</InputLabel>
+            <Select
+              label="Tipo"
+              value={form.type}
+              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as 'bigquery' | 'postgres' }))}
+            >
+              <MenuItem value="bigquery">BigQuery</MenuItem>
+              <MenuItem value="postgres">Postgres</MenuItem>
+            </Select>
+          </FormControl>
           <TextField
             label="Nome"
             value={form.name}
@@ -317,33 +399,89 @@ export function ConnectionsPage() {
             fullWidth
             size="small"
           />
-          <TextField
-            label="Location (opcional)"
-            placeholder="ex: US, EU, southamerica-east1"
-            value={form.location}
-            onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-            fullWidth
-            size="small"
-          />
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-              Service Account JSON
-            </Typography>
-            <TextField
-              placeholder="Cole o conteúdo do JSON aqui…"
-              value={form.credentials}
-              onChange={(e) => setForm((f) => ({ ...f, credentials: e.target.value }))}
-              multiline
-              rows={6}
-              fullWidth
-              size="small"
-              inputProps={{ style: { fontFamily: 'monospace', fontSize: 12 } }}
-            />
-            <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileRead} />
-            <Button size="small" onClick={() => fileInputRef.current?.click()} sx={{ mt: 0.5 }}>
-              Ou carregar arquivo .json
-            </Button>
-          </Box>
+          {form.type === 'bigquery' ? (
+            <>
+              <TextField
+                label="Location (opcional)"
+                placeholder="ex: US, EU, southamerica-east1"
+                value={form.location}
+                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                fullWidth
+                size="small"
+              />
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                  Service Account JSON
+                </Typography>
+                <TextField
+                  placeholder="Cole o conteúdo do JSON aqui…"
+                  value={form.credentials}
+                  onChange={(e) => setForm((f) => ({ ...f, credentials: e.target.value }))}
+                  multiline
+                  rows={6}
+                  fullWidth
+                  size="small"
+                  inputProps={{ style: { fontFamily: 'monospace', fontSize: 12 } }}
+                />
+                <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileRead} />
+                <Button size="small" onClick={() => fileInputRef.current?.click()} sx={{ mt: 0.5 }}>
+                  Ou carregar arquivo .json
+                </Button>
+              </Box>
+            </>
+          ) : (
+            <>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Host"
+                  value={form.host}
+                  onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
+                  fullWidth
+                  size="small"
+                />
+                <TextField
+                  label="Porta"
+                  value={form.port}
+                  onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))}
+                  sx={{ width: 120 }}
+                  size="small"
+                />
+              </Box>
+              <TextField
+                label="Database"
+                value={form.database}
+                onChange={(e) => setForm((f) => ({ ...f, database: e.target.value }))}
+                fullWidth
+                size="small"
+              />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Usuário"
+                  value={form.user}
+                  onChange={(e) => setForm((f) => ({ ...f, user: e.target.value }))}
+                  fullWidth
+                  size="small"
+                />
+                <TextField
+                  label="Senha"
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                  fullWidth
+                  size="small"
+                />
+              </Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={form.ssl}
+                    onChange={(e) => setForm((f) => ({ ...f, ssl: e.target.checked }))}
+                  />
+                }
+                label="Usar SSL"
+              />
+            </>
+          )}
           {saveError && (
             <Typography variant="body2" color="error">{saveError}</Typography>
           )}

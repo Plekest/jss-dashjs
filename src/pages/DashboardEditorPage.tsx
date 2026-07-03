@@ -4,14 +4,24 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
+  FormControlLabel,
+  IconButton,
   InputLabel,
   MenuItem,
   Select,
+  Switch,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ShareIcon from '@mui/icons-material/Share'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { DashjsMount } from '../components/DashjsMount'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
@@ -36,6 +46,11 @@ export function DashboardEditorPage() {
   const [activeDataset, setActiveDataset] = useState<Dataset | null>(null)
   const [loadingDataset, setLoadingDataset] = useState(false)
 
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareInfo, setShareInfo] = useState<{ slug: string | null; published: boolean } | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [copied, setCopied] = useState(false)
+
   // Bumped when the user switches datasets — forces a clean re-mount of
   // DashjsMount so dashjs re-runs loadFields() with the new dataSource.
   const [mountKey, setMountKey] = useState(0)
@@ -50,6 +65,7 @@ export function DashboardEditorPage() {
     Promise.all([loadDashboard(id), dashboardsApi.get(id)])
       .then(([dash, row]) => {
         setDashboard(dash ?? createEmptyDashboard('Sem título'))
+        setShareInfo({ slug: row.slug, published: row.published })
         if (row.datasetId) {
           return datasetsApi.get(row.datasetId).then((ds) => {
             setActiveDataset(ds)
@@ -133,6 +149,26 @@ export function DashboardEditorPage() {
     }
   }
 
+  async function handleTogglePublish() {
+    if (!idRef.current) return
+    setSharing(true)
+    try {
+      const updated = shareInfo?.published
+        ? await dashboardsApi.unpublish(idRef.current)
+        : await dashboardsApi.publish(idRef.current)
+      setShareInfo({ slug: updated.slug, published: updated.published })
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function handleCopyLink() {
+    if (!shareInfo?.slug) return
+    await navigator.clipboard.writeText(`${window.location.origin}/view/${shareInfo.slug}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
   if (loading || !dashboard) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -207,7 +243,54 @@ export function DashboardEditorPage() {
             {activeDataset.columns.length} campos disponíveis
           </Typography>
         )}
+
+        <Box sx={{ flexGrow: 1 }} />
+
+        {id && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ShareIcon />}
+            onClick={() => setShareOpen(true)}
+          >
+            Compartilhar
+          </Button>
+        )}
       </Box>
+
+      <Dialog open={shareOpen} onClose={() => setShareOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Compartilhar dashboard</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={!!shareInfo?.published}
+                onChange={handleTogglePublish}
+                disabled={sharing}
+              />
+            }
+            label={shareInfo?.published ? 'Publicado' : 'Não publicado'}
+          />
+          {shareInfo?.published && shareInfo.slug && (
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                fullWidth
+                size="small"
+                value={`${window.location.origin}/view/${shareInfo.slug}`}
+                slotProps={{ input: { readOnly: true } }}
+              />
+              <Tooltip title={copied ? 'Copiado!' : 'Copiar link'}>
+                <IconButton onClick={handleCopyLink}>
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShareOpen(false)}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* dashjs editor — key = id + mountKey ensures a clean re-mount
           whenever the user switches the data source.

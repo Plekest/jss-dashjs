@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS dashboards (
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS slug text UNIQUE;
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT false;
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS published_at timestamptz;
+
 CREATE TABLE IF NOT EXISTS connections (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
@@ -38,3 +42,13 @@ CREATE TABLE IF NOT EXISTS connections (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Scheduled refresh: only datasets ingested from a connection (BigQuery
+-- today) carry a source query to re-run; CSV/upload datasets never get
+-- these columns populated.
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS connection_id uuid REFERENCES connections(id) ON DELETE SET NULL;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_sql text;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS refresh_interval_minutes integer;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS next_refresh_at timestamptz;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_refreshed_at timestamptz;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_refresh_error text;

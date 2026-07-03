@@ -1,12 +1,15 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
+import { runQuery } from '../queryEngine.js'
 
 const router = Router()
 
 // List metadata (no data column — keeps response light)
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(
-    'SELECT id, name, source_type, row_count, created_at, updated_at FROM datasets ORDER BY updated_at DESC',
+    `SELECT id, name, source_type, row_count, connection_id, refresh_interval_minutes,
+            next_refresh_at, last_refreshed_at, last_refresh_error, created_at, updated_at
+     FROM datasets ORDER BY updated_at DESC`,
   )
   res.json(rows.map(toCamel))
 })
@@ -61,6 +64,32 @@ router.delete('/:id', async (req, res) => {
   res.status(204).end()
 })
 
+// Update the auto-refresh interval, recalculating next_refresh_at.
+router.put('/:id/refresh-schedule', async (req, res) => {
+  const { refreshIntervalMinutes } = req.body as { refreshIntervalMinutes: number | null }
+  const { rows } = await pool.query(
+    `UPDATE datasets SET refresh_interval_minutes = $1,
+            next_refresh_at = CASE WHEN $1::int IS NOT NULL THEN now() + ($1 || ' minutes')::interval ELSE NULL END
+     WHERE id = $2 RETURNING *`,
+    [refreshIntervalMinutes, req.params.id],
+  )
+  if (!rows.length) return res.status(404).json({ error: 'not found' })
+  res.json(toCamel(rows[0]))
+})
+
+// Force an immediate refresh, without waiting for the schedule.
+router.post('/:id/refresh-now', async (req, res) => {
+  try {
+    await refreshDataset(req.params.id)
+    const { rows } = await pool.query('SELECT * FROM datasets WHERE id = $1', [req.params.id])
+    if (!rows.length) return res.status(404).json({ error: 'not found' })
+    res.json(toCamel(rows[0]))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(400).json({ error: msg })
+  }
+})
+
 export function toCamel(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -70,6 +99,12 @@ export function toCamel(row: Record<string, unknown>) {
     data: row.data,
     meta: row.meta ?? {},
     rowCount: row.row_count,
+    connectionId: row.connection_id,
+    sourceSql: row.source_sql,
+    refreshIntervalMinutes: row.refresh_interval_minutes,
+    nextRefreshAt: row.next_refresh_at,
+    lastRefreshedAt: row.last_refreshed_at,
+    lastRefreshError: row.last_refresh_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -80,14 +115,60 @@ export async function insertDataset(
   sourceType: string,
   columns: unknown[],
   data: unknown[][],
+  origin?: { connectionId: string; sourceSql: string; refreshIntervalMinutes: number | null },
 ) {
   const { rows } = await pool.query(
-    `INSERT INTO datasets (name, source_type, columns, data, row_count)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO datasets (name, source_type, columns, data, row_count, connection_id, source_sql, refresh_interval_minutes, next_refresh_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+             CASE WHEN $8::int IS NOT NULL THEN now() + ($8 || ' minutes')::interval ELSE NULL END)
      RETURNING *`,
-    [name, sourceType, JSON.stringify(columns), JSON.stringify(data), data.length],
+    [
+      name,
+      sourceType,
+      JSON.stringify(columns),
+      JSON.stringify(data),
+      data.length,
+      origin?.connectionId ?? null,
+      origin?.sourceSql ?? null,
+      origin?.refreshIntervalMinutes ?? null,
+    ],
   )
   return toCamel(rows[0])
+}
+
+/** Re-runs a dataset's source query and overwrites its data. Throws when the
+ *  dataset has no connection/source_sql to refresh, or when the query fails
+ *  (after recording last_refresh_error so the UI can surface it). Shared by
+ *  the refresh-now route and the background scheduler. */
+export async function refreshDataset(id: string): Promise<void> {
+  const { rows } = await pool.query(
+    'SELECT connection_id, source_sql, refresh_interval_minutes FROM datasets WHERE id = $1',
+    [id],
+  )
+  if (!rows.length) throw new Error('not found')
+  const row = rows[0] as { connection_id: string | null; source_sql: string | null; refresh_interval_minutes: number | null }
+  if (!row.connection_id || !row.source_sql) {
+    throw new Error('dataset has no connection/source query to refresh')
+  }
+  try {
+    const { columns, data } = await runQuery(row.connection_id, row.source_sql, 50_000)
+    await pool.query(
+      `UPDATE datasets SET columns = $1, data = $2, row_count = $3,
+              last_refreshed_at = now(), last_refresh_error = NULL,
+              next_refresh_at = CASE WHEN $4::int IS NOT NULL THEN now() + ($4 || ' minutes')::interval ELSE NULL END
+       WHERE id = $5`,
+      [JSON.stringify(columns), JSON.stringify(data), data.length, row.refresh_interval_minutes, id],
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await pool.query(
+      `UPDATE datasets SET last_refresh_error = $1,
+              next_refresh_at = CASE WHEN $2::int IS NOT NULL THEN now() + ($2 || ' minutes')::interval ELSE NULL END
+       WHERE id = $3`,
+      [msg, row.refresh_interval_minutes, id],
+    )
+    throw err
+  }
 }
 
 export default router

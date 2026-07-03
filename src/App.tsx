@@ -10,6 +10,7 @@ import { DashboardsPage } from './pages/DashboardsPage'
 import { DashboardEditorPage } from './pages/DashboardEditorPage'
 import { DatasetsProvider } from './stores/datasetsStore'
 import { ConnectionsPage } from './pages/ConnectionsPage'
+import { PublicDashboardView } from './pages/PublicDashboardView'
 
 function ThemedApp() {
   const { mode } = useColorMode()
@@ -29,6 +30,7 @@ function ThemedApp() {
               <Route path="dashboards" element={<DashboardsPage />} />
               <Route path="dashboards/:id" element={<DashboardEditorPage />} />
             </Route>
+            <Route path="view/:slug" element={<PublicDashboardView />} />
           </Routes>
         </BrowserRouter>
       </DatasetsProvider>

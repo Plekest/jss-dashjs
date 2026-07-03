@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { randomBytes } from 'crypto'
 import { pool } from '../db.js'
 
 const router = Router()
@@ -6,7 +7,7 @@ const router = Router()
 // List metadata
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(
-    'SELECT id, name, dataset_id, created_at, updated_at FROM dashboards ORDER BY updated_at DESC',
+    'SELECT id, name, dataset_id, slug, published, published_at, created_at, updated_at FROM dashboards ORDER BY updated_at DESC',
   )
   res.json(rows.map(toCamel))
 })
@@ -62,12 +63,37 @@ router.delete('/:id', async (req, res) => {
   res.status(204).end()
 })
 
+// Publish — generates a slug on first publish, reuses it on republish.
+router.post('/:id/publish', async (req, res) => {
+  const { rows: existing } = await pool.query('SELECT slug FROM dashboards WHERE id = $1', [req.params.id])
+  if (!existing.length) return res.status(404).json({ error: 'not found' })
+  const slug = existing[0].slug ?? randomBytes(9).toString('base64url')
+  const { rows } = await pool.query(
+    `UPDATE dashboards SET slug = $1, published = true, published_at = now() WHERE id = $2 RETURNING *`,
+    [slug, req.params.id],
+  )
+  res.json(toCamel(rows[0]))
+})
+
+// Unpublish — keeps the slug so republishing reuses the same link.
+router.post('/:id/unpublish', async (req, res) => {
+  const { rows } = await pool.query(
+    `UPDATE dashboards SET published = false WHERE id = $1 RETURNING *`,
+    [req.params.id],
+  )
+  if (!rows.length) return res.status(404).json({ error: 'not found' })
+  res.json(toCamel(rows[0]))
+})
+
 function toCamel(row: Record<string, unknown>) {
   return {
     id: row.id,
     name: row.name,
     definition: row.definition,
     datasetId: row.dataset_id,
+    slug: row.slug,
+    published: row.published,
+    publishedAt: row.published_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

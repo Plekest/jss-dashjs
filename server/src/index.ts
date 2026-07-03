@@ -3,6 +3,9 @@ import cors from 'cors'
 import datasetsRouter from './routes/datasets.js'
 import dashboardsRouter from './routes/dashboards.js'
 import connectionsRouter from './routes/connections.js'
+import publicRouter from './routes/public.js'
+import { pool } from './db.js'
+import { startRefreshScheduler } from './refreshScheduler.js'
 
 const app = express()
 
@@ -12,7 +15,10 @@ app.use(express.json({ limit: '50mb' }))
 app.use('/api/datasets', datasetsRouter)
 app.use('/api/dashboards', dashboardsRouter)
 app.use('/api/connections', connectionsRouter)
+app.use('/api/public', publicRouter)
 app.get('/api/health', (_req, res) => res.json({ ok: true }))
+
+startRefreshScheduler(pool)
 
 const port = Number(process.env.PORT ?? 3001)
 app.listen(port, () => {

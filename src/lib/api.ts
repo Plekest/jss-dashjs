@@ -3,6 +3,11 @@ export interface DatasetMeta {
   name: string
   sourceType: string
   rowCount: number
+  connectionId: string | null
+  refreshIntervalMinutes: number | null
+  nextRefreshAt: string | null
+  lastRefreshedAt: string | null
+  lastRefreshError: string | null
   createdAt: string
   updatedAt: string
 }
@@ -29,14 +34,25 @@ export interface Dataset extends DatasetMeta {
   columns: { title: string }[]
   data: (string | number)[][]
   meta?: DatasetMetaPayload
+  sourceSql: string | null
 }
 
 export interface DashboardMeta {
   id: string
   name: string
   datasetId: string | null
+  slug: string | null
+  published: boolean
+  publishedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface PublicDashboard {
+  id: string
+  name: string
+  definition: object
+  dataset: { columns: { title: string }[]; data: (string | number)[][] } | null
 }
 
 export interface DashboardRecord extends DashboardMeta {
@@ -55,7 +71,7 @@ export interface ConnectionMeta {
   id: string
   name: string
   type: string
-  config: { projectId?: string; clientEmail?: string; location?: string }
+  config: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -63,7 +79,7 @@ export interface ConnectionMeta {
 export const connectionsApi = {
   list: () => fetch('/api/connections').then(json<ConnectionMeta[]>),
 
-  create: (d: { name: string; type: 'bigquery'; credentials: string; location?: string }) =>
+  create: (d: { name: string; type: 'bigquery' | 'postgres'; credentials: string | Record<string, unknown>; location?: string }) =>
     fetch('/api/connections', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -82,11 +98,11 @@ export const connectionsApi = {
       body: JSON.stringify({ sql }),
     }).then(json<{ columns: { title: string }[]; data: (string | number)[][] }>),
 
-  ingest: (id: string, sql: string, name: string) =>
+  ingest: (id: string, sql: string, name: string, refreshIntervalMinutes?: number | null) =>
     fetch(`/api/connections/${id}/ingest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sql, name }),
+      body: JSON.stringify({ sql, name, refreshIntervalMinutes }),
     }).then(json<Dataset>),
 }
 
@@ -113,6 +129,16 @@ export const datasetsApi = {
 
   remove: (id: string) =>
     fetch(`/api/datasets/${id}`, { method: 'DELETE' }),
+
+  updateRefreshSchedule: (id: string, refreshIntervalMinutes: number | null) =>
+    fetch(`/api/datasets/${id}/refresh-schedule`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshIntervalMinutes }),
+    }).then(json<Dataset>),
+
+  refreshNow: (id: string) =>
+    fetch(`/api/datasets/${id}/refresh-now`, { method: 'POST' }).then(json<Dataset>),
 }
 
 export const dashboardsApi = {
@@ -138,4 +164,15 @@ export const dashboardsApi = {
 
   remove: (id: string) =>
     fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+
+  publish: (id: string) =>
+    fetch(`/api/dashboards/${id}/publish`, { method: 'POST' }).then(json<DashboardMeta>),
+
+  unpublish: (id: string) =>
+    fetch(`/api/dashboards/${id}/unpublish`, { method: 'POST' }).then(json<DashboardMeta>),
+}
+
+export const publicApi = {
+  get: (slug: string) =>
+    fetch(`/api/public/${slug}`).then(json<PublicDashboard>),
 }

@@ -29,7 +29,7 @@ interface Props {
   onClose: () => void
 }
 
-export function ImportBigQueryDialog({ open, onClose }: Props) {
+export function ImportSqlDialog({ open, onClose }: Props) {
   const navigate = useNavigate()
   const { refresh } = useDatasetsStore()
 
@@ -38,7 +38,8 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
 
   const [connectionId, setConnectionId] = useState('')
   const [sql, setSql] = useState('')
-  const [datasetName, setDatasetName] = useState('bigquery_import')
+  const [datasetName, setDatasetName] = useState('sql_import')
+  const [refreshIntervalMinutes, setRefreshIntervalMinutes] = useState<number | ''>('')
 
   const [preview, setPreview] = useState<{ columns: { title: string }[]; data: (string | number)[][] } | null>(null)
   const [previewing, setPreviewing] = useState(false)
@@ -52,7 +53,7 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
     setLoadingConns(true)
     connectionsApi.list()
       .then((list) => {
-        setConnections(list.filter((c) => c.type === 'bigquery'))
+        setConnections(list.filter((c) => c.type === 'bigquery' || c.type === 'postgres'))
       })
       .finally(() => setLoadingConns(false))
   }, [open])
@@ -63,7 +64,8 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
     setImportError(null)
     setSql('')
     setConnectionId('')
-    setDatasetName('bigquery_import')
+    setDatasetName('sql_import')
+    setRefreshIntervalMinutes('')
     onClose()
   }
 
@@ -87,7 +89,7 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
     setImporting(true)
     setImportError(null)
     try {
-      await connectionsApi.ingest(connectionId, sql, datasetName.trim())
+      await connectionsApi.ingest(connectionId, sql, datasetName.trim(), refreshIntervalMinutes || null)
       await refresh()
       handleClose()
     } catch (e) {
@@ -97,16 +99,16 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
     }
   }
 
-  const noBqConnections = !loadingConns && connections.length === 0
+  const noSqlConnections = !loadingConns && connections.length === 0
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
-      <DialogTitle>Importar do BigQuery</DialogTitle>
+      <DialogTitle>Importar via SQL</DialogTitle>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
-        {noBqConnections ? (
+        {noSqlConnections ? (
           <Box sx={{ py: 4, textAlign: 'center' }}>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              Nenhuma conexão BigQuery cadastrada.
+              Nenhuma conexão SQL cadastrada.
             </Typography>
             <Button variant="outlined" onClick={() => { handleClose(); navigate('/connections') }}>
               Ir para Conexões
@@ -124,7 +126,7 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
               >
                 {connections.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
-                    {c.name} — {c.config.projectId}
+                    {c.name} — {String(c.type === 'postgres' ? c.config.database : c.config.projectId)}
                   </MenuItem>
                 ))}
               </Select>
@@ -132,7 +134,7 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
 
             <TextField
               label="SQL"
-              placeholder="SELECT * FROM `projeto.dataset.tabela` LIMIT 1000"
+              placeholder="SELECT * FROM tabela LIMIT 1000"
               value={sql}
               onChange={(e) => setSql(e.target.value)}
               multiline
@@ -197,6 +199,21 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
                   size="small"
                   sx={{ mt: 2 }}
                 />
+
+                <FormControl size="small" fullWidth sx={{ mt: 2 }}>
+                  <InputLabel>Atualizar automaticamente</InputLabel>
+                  <Select
+                    label="Atualizar automaticamente"
+                    value={refreshIntervalMinutes}
+                    onChange={(e) => setRefreshIntervalMinutes(e.target.value === '' ? '' : Number(e.target.value))}
+                  >
+                    <MenuItem value="">Nunca</MenuItem>
+                    <MenuItem value={15}>15 min</MenuItem>
+                    <MenuItem value={60}>1 hora</MenuItem>
+                    <MenuItem value={360}>6 horas</MenuItem>
+                    <MenuItem value={1440}>24 horas</MenuItem>
+                  </Select>
+                </FormControl>
               </Box>
             )}
 
@@ -208,7 +225,7 @@ export function ImportBigQueryDialog({ open, onClose }: Props) {
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose}>Cancelar</Button>
-        {!noBqConnections && preview && (
+        {!noSqlConnections && preview && (
           <Button
             variant="contained"
             onClick={handleImport}

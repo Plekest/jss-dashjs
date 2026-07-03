@@ -84,8 +84,8 @@ export function CommandPalette({ open, onClose }: Props) {
             type: 'connection' as const,
             id: c.id,
             label: c.name,
-            sublabel: c.config.projectId,
-            searchText: `${c.name} ${c.type} ${c.config.projectId ?? ''} ${c.config.clientEmail ?? ''}`.toLowerCase(),
+            sublabel: String(c.config.projectId ?? c.config.database ?? ''),
+            searchText: `${c.name} ${c.type} ${c.config.projectId ?? ''} ${c.config.clientEmail ?? ''} ${c.config.host ?? ''} ${c.config.database ?? ''}`.toLowerCase(),
           })),
         ]
         setItems(results)
