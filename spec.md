@@ -170,10 +170,10 @@ Manuais:
 - [x] Cadastrar uma conexão Postgres real (host/porta/user/senha/database de um banco de teste) → "Testar conexão" retorna sucesso
 - [x] Preview de uma query SQL nessa conexão retorna linhas/colunas certas
 - [x] Ingest cria um dataset com `sourceType: 'postgres'` (não `'bigquery'`)
-- [ ] `POST /:id/refresh-now` funciona pra um dataset originado de Postgres (não só BigQuery) — **pendente**
-- [ ] Conexão BigQuery existente continua funcionando sem regressão (test/preview/ingest/refresh) — **pendente**
+- [x] `POST /:id/refresh-now` funciona pra um dataset originado de Postgres (não só BigQuery)
+- [x] Conexão BigQuery existente continua funcionando sem regressão (test/preview/ingest/refresh)
 
-**Status: código completo, 3/5 verificações manuais confirmadas em 2026-07-03. Faltam refresh-now e regressão BigQuery antes de considerar a Fase 1 fechada.**
+**Status: Fase 1 completa, 5/5 verificações manuais confirmadas em 2026-07-03.**
 
 **Nota operacional**: o container `api` builda o código no `docker build` (`Dockerfile` faz `COPY . .`), sem hot-reload/volume — qualquer mudança em `server/src/*` só entra em produção local rodando `docker compose up -d --build api`. Banco de teste criado no mesmo container Postgres da app (`jss_dashjs-db-1`): database `connector_test`, tabela `sales` (6 linhas), user/senha `jss`/`jss`, host `db` (nome do serviço docker, não `localhost`, pois `api` e `db` estão na mesma rede docker-compose).
 
@@ -249,7 +249,7 @@ Manuais:
 **Critérios de Sucesso:**
 
 Automatizados:
-- [ ] `tsc --noEmit` e `npm run build` no React app sem erros
+- [x] `tsc --noEmit` e `npm run build` no React app sem erros
 
 Manuais:
 - [ ] Dashboards → Novo Dashboard → galeria mostra "Em branco" + 3 templates
@@ -305,8 +305,8 @@ Manuais:
 **Critérios de Sucesso:**
 
 Automatizados:
-- [ ] `tsc --noEmit` no core package sem erros
-- [ ] Teste unitário de `applyBrandPalette`: retorna a view inalterada quando o chart já tem paleta própria; injeta a paleta do dashboard quando o chart não tem uma e o dashboard tem brand kit; retorna a view inalterada quando nem chart nem dashboard têm paleta (cai no `DEFAULT_PALETTE` de sempre)
+- [x] `tsc --noEmit` no core package sem erros
+- [x] Teste unitário de `applyBrandPalette`: retorna a view inalterada quando o chart já tem paleta própria; injeta a paleta do dashboard quando o chart não tem uma e o dashboard tem brand kit; retorna a view inalterada quando nem chart nem dashboard têm paleta (cai no `DEFAULT_PALETTE` de sempre)
 
 Manuais:
 - [ ] Menu Resource ▸ "Chart color palette" abre modal, define uma paleta custom, salva

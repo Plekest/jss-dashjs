@@ -18,21 +18,26 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import {
   listDashboards,
   createAndSaveDashboard,
+  createAndSaveDashboardFromTemplate,
   deleteDashboard,
   type DashboardMeta,
 } from '../lib/dashboardsStorage'
+import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '../lib/templates'
 
 export function DashboardsPage() {
   const navigate = useNavigate()
   const [dashboards, setDashboards] = useState<DashboardMeta[]>([])
   const [loadingList, setLoadingList] = useState(false)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
+  const [newDialogStep, setNewDialogStep] = useState<'gallery' | 'name'>('gallery')
+  const [selectedStart, setSelectedStart] = useState<'blank' | DashboardTemplate | null>(null)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
 
@@ -49,11 +54,33 @@ export function DashboardsPage() {
     reload()
   }, [reload])
 
+  function openNewDialog() {
+    setNewDialogStep('gallery')
+    setSelectedStart(null)
+    setNewName('')
+    setNewDialogOpen(true)
+  }
+
+  function chooseBlank() {
+    setSelectedStart('blank')
+    setNewName('Novo dashboard')
+    setNewDialogStep('name')
+  }
+
+  function chooseTemplate(template: DashboardTemplate) {
+    setSelectedStart(template)
+    setNewName(template.name)
+    setNewDialogStep('name')
+  }
+
   async function handleCreate() {
-    if (!newName.trim()) return
+    if (!newName.trim() || !selectedStart) return
     setCreating(true)
     try {
-      const { id } = await createAndSaveDashboard(newName.trim())
+      const { id } =
+        selectedStart === 'blank'
+          ? await createAndSaveDashboard(newName.trim())
+          : await createAndSaveDashboardFromTemplate(newName.trim(), selectedStart)
       setNewDialogOpen(false)
       setNewName('')
       navigate(`/dashboards/${id}`)
@@ -78,7 +105,7 @@ export function DashboardsPage() {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setNewDialogOpen(true)}
+          onClick={openNewDialog}
         >
           Novo Dashboard
         </Button>
@@ -104,7 +131,7 @@ export function DashboardsPage() {
           <Typography variant="h6" color="text.secondary">
             Nenhum dashboard ainda
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewDialogOpen(true)}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openNewDialog}>
             Criar primeiro dashboard
           </Button>
         </Box>
@@ -151,30 +178,82 @@ export function DashboardsPage() {
         </Grid>
       )}
 
-      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Novo Dashboard</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            fullWidth
-            label="Nome do dashboard"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            sx={{ mt: 1 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setNewDialogOpen(false)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            onClick={handleCreate}
-            disabled={!newName.trim() || creating}
-            startIcon={creating ? <CircularProgress size={16} color="inherit" /> : undefined}
-          >
-            Criar
-          </Button>
-        </DialogActions>
+      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="sm" fullWidth>
+        {newDialogStep === 'gallery' ? (
+          <>
+            <DialogTitle>Novo Dashboard</DialogTitle>
+            <DialogContent>
+              <Grid container spacing={2} sx={{ mt: 0 }}>
+                <Grid item xs={12} sm={6}>
+                  <Card variant="outlined" sx={{ height: '100%' }}>
+                    <CardActionArea onClick={chooseBlank} sx={{ height: '100%', p: 0.5 }}>
+                      <CardContent>
+                        <DashboardIcon sx={{ color: 'text.secondary', mb: 1, fontSize: 32 }} />
+                        <Typography variant="subtitle1" fontWeight={600}>
+                          Em branco
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Comece do zero e escolha sua própria fonte de dados.
+                        </Typography>
+                      </CardContent>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+                {DASHBOARD_TEMPLATES.map((template) => (
+                  <Grid item xs={12} sm={6} key={template.id}>
+                    <Card variant="outlined" sx={{ height: '100%' }}>
+                      <CardActionArea onClick={() => chooseTemplate(template)} sx={{ height: '100%', p: 0.5 }}>
+                        <CardContent>
+                          <DashboardIcon sx={{ color: 'primary.main', mb: 1, fontSize: 32 }} />
+                          <Typography variant="subtitle1" fontWeight={600}>
+                            {template.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {template.description}
+                          </Typography>
+                        </CardContent>
+                      </CardActionArea>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setNewDialogOpen(false)}>Cancelar</Button>
+            </DialogActions>
+          </>
+        ) : (
+          <>
+            <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <IconButton size="small" onClick={() => setNewDialogStep('gallery')}>
+                <ArrowBackIcon fontSize="small" />
+              </IconButton>
+              Novo Dashboard
+            </DialogTitle>
+            <DialogContent>
+              <TextField
+                autoFocus
+                fullWidth
+                label="Nome do dashboard"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                sx={{ mt: 1 }}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setNewDialogOpen(false)}>Cancelar</Button>
+              <Button
+                variant="contained"
+                onClick={handleCreate}
+                disabled={!newName.trim() || creating}
+                startIcon={creating ? <CircularProgress size={16} color="inherit" /> : undefined}
+              >
+                Criar
+              </Button>
+            </DialogActions>
+          </>
+        )}
       </Dialog>
     </Box>
   )
