@@ -113,11 +113,23 @@ export function DashboardEditorPage() {
     await dashboardsApi.update(idRef.current, { definition: d, datasetId })
   }, [])
 
+  // dashjs sends dashboard_id: 0 to mean "new" — this host assigns its own
+  // ids via the API, so that field is ignored here; the definition itself
+  // (pages/charts/filters/etc.) is what actually gets copied.
+  const stableOnMakeCopy = useCallback(async (d: DashboardFull) => {
+    const datasetId = selectedSourceRef.current.startsWith('dataset:')
+      ? selectedSourceRef.current.replace('dataset:', '')
+      : null
+    const row = await dashboardsApi.create({ name: d.dashboard_name, definition: d, datasetId })
+    navigate(`/dashboards/${row.id}`)
+  }, [navigate])
+
   const options: DashJsOptions = useMemo(
     () => ({
       dashboard: dashboard ?? createEmptyDashboard('Sem título'),
       dataSource,
       onSave: stableOnSave,
+      onMakeCopy: stableOnMakeCopy,
       // dashjs bundles its own formula-pro; pass the key so its engine is
       // licensed too. undefined = degraded mode, same as today.
       license: licenseKey,
