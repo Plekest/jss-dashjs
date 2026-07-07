@@ -133,6 +133,7 @@ export function DashboardEditorPage() {
       // dashjs bundles its own formula-pro; pass the key so its engine is
       // licensed too. undefined = degraded mode, same as today.
       license: licenseKey,
+      initialPanels: { data: true, properties: true },
     }),
     // Re-create only when dashboard changes (e.g. on initial load).
     // eslint-disable-next-line react-hooks/exhaustive-deps
