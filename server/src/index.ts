@@ -10,7 +10,7 @@ import { startRefreshScheduler } from './refreshScheduler.js'
 const app = express()
 
 app.use(cors())
-app.use(express.json({ limit: '50mb' }))
+app.use(express.json({ limit: '450mb' }))
 
 app.use('/api/datasets', datasetsRouter)
 app.use('/api/dashboards', dashboardsRouter)
