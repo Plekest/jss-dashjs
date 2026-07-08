@@ -11,6 +11,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['jspreadsheet', 'jsuites', 'lemonadejs', 'gridstack', 'highcharts', 'lucide', 'tabularjs'],
+    include: ['jspreadsheet', 'jsuites', 'gridstack', 'highcharts', 'lucide', 'tabularjs'],
   },
 })

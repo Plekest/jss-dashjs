@@ -12,6 +12,7 @@
 // inserts field ids, keeping formulas consistent with this contract.
 
 import type { DashJsDataSource, DataField, ChartDataSeries, DashboardChartRecord, DashboardFilter, NamedSourceMeta } from 'dashjs'
+import { matchValue, parseFlexibleDate } from 'dashjs'
 import { datasetsApi, type Dataset } from './api'
 
 export interface DatasetLike {
@@ -35,7 +36,9 @@ function guessFieldType(data: (string | number)[][], colIndex: number): DataFiel
   for (const row of data.slice(0, 20)) {
     const val = row[colIndex]
     if (val !== undefined && val !== '') {
-      return typeof val === 'number' || !isNaN(Number(val)) ? 'numeric' : 'text'
+      if (typeof val === 'number' || !isNaN(Number(val))) return 'numeric'
+      if (parseFlexibleDate(String(val)) !== null) return 'date'
+      return 'text'
     }
   }
   return 'text'
@@ -58,13 +61,15 @@ function aggregateSheetData(
     const label = String(row[colIndex] ?? '')
     if (!label) continue
 
+    // matchValue implements the full operator set (in/not_in/eq/neq/contains/
+    // gt/gte/lt/lte/between with numeric-vs-date-vs-lexicographic handling) —
+    // reimplementing a subset here previously meant daterange controls
+    // ('between') and numeric range filters were silently ignored.
     const passesFilters = filters.every((f) => {
       const fColIndex = parseInt(f.fieldId.replace('col_', ''), 10)
       if (isNaN(fColIndex)) return true
       const cellVal = String(row[fColIndex] ?? '')
-      if (f.operator === 'in' || f.operator === 'eq') return f.values.includes(cellVal)
-      if (f.operator === 'not_in' || f.operator === 'neq') return !f.values.includes(cellVal)
-      return true
+      return matchValue(cellVal, f)
     })
     if (!passesFilters) continue
 
