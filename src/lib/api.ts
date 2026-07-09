@@ -37,6 +37,12 @@ export interface Dataset extends DatasetMeta {
   sourceSql: string | null
 }
 
+export interface DatasetRefreshLogEntry {
+  datasetId: string
+  datasetName: string
+  refreshedAt: string
+}
+
 export interface DashboardMeta {
   id: string
   name: string
@@ -158,6 +164,9 @@ export const datasetsApi = {
 
   refreshNow: (id: string) =>
     fetch(`/api/datasets/${id}/refresh-now`, { method: 'POST' }).then(json<Dataset>),
+
+  refreshLog: (days = 7) =>
+    fetch(`/api/datasets/refresh-log?days=${days}`).then(json<DatasetRefreshLogEntry[]>),
 }
 
 export const dashboardsApi = {

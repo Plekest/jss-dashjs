@@ -11,7 +11,7 @@ import type { DashboardChartRecord } from 'dashjs'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { AddDataSourceWizard } from '../components/AddDataSourceWizard'
 import { MiniChart } from '../components/MiniChart'
-import { dashboardsApi, connectionsApi, type DashboardMeta, type ConnectionMeta } from '../lib/api'
+import { dashboardsApi, connectionsApi, datasetsApi, type DashboardMeta, type ConnectionMeta, type DatasetRefreshLogEntry } from '../lib/api'
 
 /** Count of items created within the last `days` days — powers the trend
  *  delta caption under each stat card ("+N essa semana"). */
@@ -33,6 +33,7 @@ export function HomePage() {
   const [dashboards, setDashboards] = useState<DashboardMeta[]>([])
   const [loadingDashboards, setLoadingDashboards] = useState(true)
   const [connections, setConnections] = useState<ConnectionMeta[]>([])
+  const [refreshLog, setRefreshLog] = useState<DatasetRefreshLogEntry[]>([])
   const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
@@ -44,6 +45,10 @@ export function HomePage() {
 
   useEffect(() => {
     connectionsApi.list().then(setConnections)
+  }, [])
+
+  useEffect(() => {
+    datasetsApi.refreshLog(7).then(setRefreshLog)
   }, [])
 
   function togglePin(d: DashboardMeta, e: MouseEvent) {
@@ -82,20 +87,35 @@ export function HomePage() {
     [datasets],
   )
 
-  const refreshActivity = useMemo(() => {
+  const refreshActivityDayBuckets = useMemo(() => {
     const now = new Date()
-    const buckets = Array.from({ length: 7 }, (_, i) => {
+    return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i))
       return { key: d.toDateString(), label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) }
     })
-    const counts = new Map(buckets.map((b) => [b.key, 0]))
-    autoRefreshDatasets.forEach((d) => {
-      if (!d.lastRefreshedAt) return
-      const key = new Date(d.lastRefreshedAt).toDateString()
-      if (counts.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1)
-    })
-    return buckets.map((b) => ({ label: b.label, value: counts.get(b.key) ?? 0 }))
-  }, [autoRefreshDatasets])
+  }, [])
+
+  // One line per auto-refresh-enabled dataset: how many auto-refreshes it had
+  // each of the last 7 days. Real event counts from dataset_refresh_log, not
+  // just presence of a lastRefreshedAt timestamp.
+  const refreshActivitySeries = useMemo(
+    () =>
+      autoRefreshDatasets.map((d) => {
+        const counts = new Map(refreshActivityDayBuckets.map((b) => [b.key, 0]))
+        refreshLog.forEach((entry) => {
+          if (entry.datasetId !== d.id) return
+          const key = new Date(entry.refreshedAt).toDateString()
+          if (counts.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1)
+        })
+        return {
+          name: d.name,
+          data: refreshActivityDayBuckets.map((b) => ({ label: b.label, value: counts.get(b.key) ?? 0 })),
+        }
+      }),
+    [autoRefreshDatasets, refreshActivityDayBuckets, refreshLog],
+  )
+
+  const refreshActivityTotal = refreshLog.length
 
   const datasetsChart: DashboardChartRecord = useMemo(
     () => ({
@@ -119,12 +139,12 @@ export function HomePage() {
       dashboard_chart_type: 'line',
       dashboard_chart_config: {
         style: { gridLines: true, smooth: true },
-        labels: { showLegend: false, showValues: true, valueFormat: 'number' },
-        colors: { palette: [CHART_PALETTE[1]] },
+        labels: { showLegend: true, legendPosition: 'bottom', showValues: false, valueFormat: 'number' },
+        colors: { palette: CHART_PALETTE },
       },
-      series: [{ name: 'Atualizações', data: refreshActivity }],
+      series: refreshActivitySeries,
     }),
-    [refreshActivity],
+    [refreshActivitySeries],
   )
 
   const loading = loadingDashboards || loadingDatasets
@@ -258,9 +278,14 @@ export function HomePage() {
               {autoRefreshDatasets.length > 0 && (
                 <Grid item xs={12} md={6}>
                   <Card sx={{ p: 2.5 }}>
-                    <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-                      Atualizações automáticas (7 dias)
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+                      <Typography variant="subtitle2" fontWeight={600}>
+                        Atualizações automáticas (7 dias)
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                        {refreshActivityTotal} {refreshActivityTotal === 1 ? 'execução' : 'execuções'}
+                      </Typography>
+                    </Box>
                     <Box sx={{ height: 280 }}>
                       <MiniChart chart={refreshActivityChart} height={280} />
                     </Box>

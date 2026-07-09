@@ -182,3 +182,17 @@ CREATE TABLE IF NOT EXISTS scheduled_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_reports_tenant ON scheduled_reports(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_reports_dashboard ON scheduled_reports(dashboard_id);
+
+-- One row per refresh attempt (auto-scheduled or manual "refresh now") so
+-- the home dashboard can chart real refresh counts per dataset, instead of
+-- inferring activity from the single last_refreshed_at timestamp.
+CREATE TABLE IF NOT EXISTS dataset_refresh_log (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  dataset_id   uuid NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  tenant_id    uuid REFERENCES tenants(id) ON DELETE CASCADE,
+  source       text NOT NULL DEFAULT 'auto' CHECK (source IN ('auto', 'manual')),
+  success      boolean NOT NULL,
+  refreshed_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dataset_refresh_log_tenant_time ON dataset_refresh_log(tenant_id, refreshed_at);
+CREATE INDEX IF NOT EXISTS idx_dataset_refresh_log_dataset ON dataset_refresh_log(dataset_id);

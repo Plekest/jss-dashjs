@@ -19,6 +19,30 @@ router.get('/', async (req, res) => {
   res.json(rows.map(toCamel))
 })
 
+// Auto-refresh event log for the home dashboard chart: one point per
+// dataset per day, counting only source='auto' (scheduler-triggered)
+// refreshes within the requested window. Must stay above GET /:id so
+// "refresh-log" doesn't get swallowed as an :id.
+router.get('/refresh-log', async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90)
+  const { rows } = await pool.query(
+    `SELECT l.dataset_id, d.name AS dataset_name, l.refreshed_at
+     FROM dataset_refresh_log l
+     JOIN datasets d ON d.id = l.dataset_id
+     WHERE l.tenant_id = $1 AND l.source = 'auto' AND l.refreshed_at >= now() - ($2 || ' days')::interval
+     ORDER BY l.refreshed_at`,
+    [auth.tenantId, days],
+  )
+  res.json(
+    rows.map((row) => ({
+      datasetId: row.dataset_id,
+      datasetName: row.dataset_name,
+      refreshedAt: row.refreshed_at,
+    })),
+  )
+})
+
 // Get full dataset including data
 router.get('/:id', async (req, res) => {
   const { auth } = req as unknown as AuthedRequest
@@ -93,7 +117,7 @@ router.post('/:id/refresh-now', requireRole('owner', 'editor'), async (req, res)
   try {
     const { rows: owned } = await pool.query('SELECT 1 FROM datasets WHERE id = $1 AND tenant_id = $2', [req.params.id, auth.tenantId])
     if (!owned.length) return res.status(404).json({ error: 'not found' })
-    await refreshDataset(req.params.id as string)
+    await refreshDataset(req.params.id as string, 'manual')
     const { rows } = await pool.query('SELECT * FROM datasets WHERE id = $1', [req.params.id])
     if (!rows.length) return res.status(404).json({ error: 'not found' })
     res.json(toCamel(rows[0]))
@@ -155,14 +179,21 @@ export async function insertDataset(
 /** Re-runs a dataset's source query and overwrites its data. Throws when the
  *  dataset has no connection/source_sql to refresh, or when the query fails
  *  (after recording last_refresh_error so the UI can surface it). Shared by
- *  the refresh-now route and the background scheduler. */
-export async function refreshDataset(id: string): Promise<void> {
+ *  the refresh-now route (source='manual') and the background scheduler
+ *  (source='auto'); every attempt is appended to dataset_refresh_log so the
+ *  home dashboard can chart real refresh counts, not just the last timestamp. */
+export async function refreshDataset(id: string, source: 'auto' | 'manual' = 'auto'): Promise<void> {
   const { rows } = await pool.query(
-    'SELECT connection_id, source_sql, refresh_interval_minutes FROM datasets WHERE id = $1',
+    'SELECT connection_id, source_sql, refresh_interval_minutes, tenant_id FROM datasets WHERE id = $1',
     [id],
   )
   if (!rows.length) throw new Error('not found')
-  const row = rows[0] as { connection_id: string | null; source_sql: string | null; refresh_interval_minutes: number | null }
+  const row = rows[0] as {
+    connection_id: string | null
+    source_sql: string | null
+    refresh_interval_minutes: number | null
+    tenant_id: string | null
+  }
   if (!row.connection_id || !row.source_sql) {
     throw new Error('dataset has no connection/source query to refresh')
   }
@@ -175,6 +206,10 @@ export async function refreshDataset(id: string): Promise<void> {
        WHERE id = $5`,
       [JSON.stringify(columns), JSON.stringify(data), data.length, row.refresh_interval_minutes, id],
     )
+    await pool.query(
+      `INSERT INTO dataset_refresh_log (dataset_id, tenant_id, source, success) VALUES ($1, $2, $3, true)`,
+      [id, row.tenant_id, source],
+    )
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await pool.query(
@@ -182,6 +217,10 @@ export async function refreshDataset(id: string): Promise<void> {
               next_refresh_at = CASE WHEN $2::int IS NOT NULL THEN now() + ($2 || ' minutes')::interval ELSE NULL END
        WHERE id = $3`,
       [msg, row.refresh_interval_minutes, id],
+    )
+    await pool.query(
+      `INSERT INTO dataset_refresh_log (dataset_id, tenant_id, source, success) VALUES ($1, $2, $3, false)`,
+      [id, row.tenant_id, source],
     )
     throw err
   }
