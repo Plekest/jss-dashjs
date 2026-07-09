@@ -19,6 +19,7 @@ import StorageIcon from '@mui/icons-material/Storage'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { AddDataSourceWizard } from '../components/AddDataSourceWizard'
+import { AlertsPanel } from '../components/AlertsPanel'
 import { connectionsApi, datasetsApi, type ConnectionMeta } from '../lib/api'
 import { useAuth } from '../stores/authStore'
 
@@ -39,6 +40,7 @@ export function DataPage() {
   const canEdit = role !== 'viewer'
   const [wizardOpen, setWizardOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [tab, setTab] = useState(0)
   const [refreshingNow, setRefreshingNow] = useState(false)
   const [savingInterval, setSavingInterval] = useState(false)
   const [connections, setConnections] = useState<ConnectionMeta[]>([])
@@ -179,7 +181,7 @@ export function DataPage() {
               return (
                 <Box
                   key={ds.id}
-                  onClick={() => setSelectedId(ds.id)}
+                  onClick={() => { setSelectedId(ds.id); setTab(0) }}
                   sx={{
                     px: 2,
                     py: 1.25,
@@ -209,110 +211,122 @@ export function DataPage() {
               </Typography>
 
               <Tabs
-                value={0}
+                value={tab}
                 onChange={(_, value) => {
-                  if (value !== 1) return
-                  // Sheets doesn't take a dataset via URL — it reads
-                  // activeDataset from the store, so this must run first.
-                  setActiveDataset(selected.id)
-                  navigate('/sheets')
+                  if (value === 1) {
+                    // Sheets doesn't take a dataset via URL — it reads
+                    // activeDataset from the store, so this must run first.
+                    setActiveDataset(selected.id)
+                    navigate('/sheets')
+                    return
+                  }
+                  setTab(value)
                 }}
                 sx={{ mb: 2, minHeight: 36 }}
               >
                 <Tab label="Overview" sx={{ minHeight: 36 }} />
                 <Tab label="Planilha" sx={{ minHeight: 36 }} />
+                <Tab label="Alertas" sx={{ minHeight: 36 }} />
               </Tabs>
 
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: '140px 1fr',
-                  rowGap: 1.25,
-                  columnGap: 2,
-                  mb: 3,
-                  maxWidth: 480,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                  Tipo
-                </Typography>
-                <Typography variant="body2">{selected.sourceType.toUpperCase()}</Typography>
-
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                  Linhas
-                </Typography>
-                <Typography variant="body2">{formatRows(selected.rowCount)}</Typography>
-
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                  Atualizado
-                </Typography>
-                <Typography variant="body2">{formatDate(selected.updatedAt)}</Typography>
-              </Box>
-
-              {selected.connectionId && (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Criado de:{' '}
+              {tab === 0 && (
+                <>
                   <Box
-                    component="span"
-                    onClick={() => navigate(`/connections?select=${selected.connectionId}`)}
-                    sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '140px 1fr',
+                      rowGap: 1.25,
+                      columnGap: 2,
+                      mb: 3,
+                      maxWidth: 480,
+                    }}
                   >
-                    Conexão {connections.find((c) => c.id === selected.connectionId)?.name ?? selected.connectionId}
-                  </Box>
-                </Typography>
-              )}
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Tipo
+                    </Typography>
+                    <Typography variant="body2">{selected.sourceType.toUpperCase()}</Typography>
 
-              {selected.connectionId && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3, maxWidth: 480 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {selected.lastRefreshError ? (
-                      <Chip size="small" color="error" label={`Erro: ${selected.lastRefreshError}`} />
-                    ) : selected.lastRefreshedAt ? (
-                      <Chip size="small" color="success" label={`Atualizado às ${formatDate(selected.lastRefreshedAt)}`} />
-                    ) : (
-                      <Chip size="small" label="Nunca atualizado automaticamente" />
-                    )}
-                    <Button
-                      size="small"
-                      startIcon={refreshingNow ? <CircularProgress size={14} /> : <RefreshIcon />}
-                      onClick={() => handleRefreshNow(selected.id)}
-                      disabled={refreshingNow}
-                    >
-                      Atualizar agora
-                    </Button>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Linhas
+                    </Typography>
+                    <Typography variant="body2">{formatRows(selected.rowCount)}</Typography>
+
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                      Atualizado
+                    </Typography>
+                    <Typography variant="body2">{formatDate(selected.updatedAt)}</Typography>
                   </Box>
 
-                  <FormControl size="small" sx={{ maxWidth: 240 }}>
-                    <InputLabel>Atualizar automaticamente</InputLabel>
-                    <Select
-                      label="Atualizar automaticamente"
-                      value={selected.refreshIntervalMinutes ?? ''}
-                      disabled={savingInterval}
-                      onChange={(e) =>
-                        handleRefreshIntervalChange(selected.id, e.target.value === '' ? null : Number(e.target.value))
-                      }
-                    >
-                      <MenuItem value="">Nunca</MenuItem>
-                      <MenuItem value={15}>15 min</MenuItem>
-                      <MenuItem value={60}>1 hora</MenuItem>
-                      <MenuItem value={360}>6 horas</MenuItem>
-                      <MenuItem value={1440}>24 horas</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
+                  {selected.connectionId && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Criado de:{' '}
+                      <Box
+                        component="span"
+                        onClick={() => navigate(`/connections?select=${selected.connectionId}`)}
+                        sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                      >
+                        Conexão {connections.find((c) => c.id === selected.connectionId)?.name ?? selected.connectionId}
+                      </Box>
+                    </Typography>
+                  )}
+
+                  {selected.connectionId && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3, maxWidth: 480 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {selected.lastRefreshError ? (
+                          <Chip size="small" color="error" label={`Erro: ${selected.lastRefreshError}`} />
+                        ) : selected.lastRefreshedAt ? (
+                          <Chip size="small" color="success" label={`Atualizado às ${formatDate(selected.lastRefreshedAt)}`} />
+                        ) : (
+                          <Chip size="small" label="Nunca atualizado automaticamente" />
+                        )}
+                        <Button
+                          size="small"
+                          startIcon={refreshingNow ? <CircularProgress size={14} /> : <RefreshIcon />}
+                          onClick={() => handleRefreshNow(selected.id)}
+                          disabled={refreshingNow}
+                        >
+                          Atualizar agora
+                        </Button>
+                      </Box>
+
+                      <FormControl size="small" sx={{ maxWidth: 240 }}>
+                        <InputLabel>Atualizar automaticamente</InputLabel>
+                        <Select
+                          label="Atualizar automaticamente"
+                          value={selected.refreshIntervalMinutes ?? ''}
+                          disabled={savingInterval}
+                          onChange={(e) =>
+                            handleRefreshIntervalChange(selected.id, e.target.value === '' ? null : Number(e.target.value))
+                          }
+                        >
+                          <MenuItem value="">Nunca</MenuItem>
+                          <MenuItem value={15}>15 min</MenuItem>
+                          <MenuItem value={60}>1 hora</MenuItem>
+                          <MenuItem value={360}>6 horas</MenuItem>
+                          <MenuItem value={1440}>24 horas</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Box>
+                  )}
+
+                  {canEdit && (
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteOutlineIcon />}
+                        onClick={() => handleDelete(selected.id, selected.name)}
+                      >
+                        Remover
+                      </Button>
+                    </Box>
+                  )}
+                </>
               )}
 
-              {canEdit && (
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<DeleteOutlineIcon />}
-                    onClick={() => handleDelete(selected.id, selected.name)}
-                  >
-                    Remover
-                  </Button>
-                </Box>
+              {tab === 2 && (
+                <AlertsPanel datasetId={selected.id} canEdit={canEdit} />
               )}
             </Box>
           )}

@@ -132,3 +132,53 @@ CREATE TABLE IF NOT EXISTS dashboard_templates (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_dashboard_templates_tenant ON dashboard_templates(tenant_id);
+
+CREATE TABLE IF NOT EXISTS alerts (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id              uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  dataset_id             uuid NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  name                   text NOT NULL,
+  column_name            text NOT NULL,
+  aggregation            text NOT NULL CHECK (aggregation IN ('sum','mean','count','max','min')),
+  operator               text NOT NULL CHECK (operator IN ('gt','gte','lt','lte','eq')),
+  threshold              numeric NOT NULL,
+  recipients             text[] NOT NULL,
+  renotify_after_minutes integer,
+  active                 boolean NOT NULL DEFAULT true,
+  created_by             uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_dataset ON alerts(dataset_id);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id     uuid NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+  triggered_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at  timestamptz,
+  value        numeric NOT NULL,
+  notified_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id);
+-- Um único evento "aberto" (resolved_at IS NULL) por alerta de cada vez.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(alert_id) WHERE resolved_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  dashboard_id   uuid NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+  name           text NOT NULL,
+  metrics        jsonb NOT NULL, -- [{ "label": "Vendas totais", "column": "revenue", "aggregation": "sum" }]
+  recipients     text[] NOT NULL,
+  cron           text NOT NULL,
+  next_run_at    timestamptz NOT NULL,
+  last_run_at    timestamptz,
+  last_run_error text,
+  active         boolean NOT NULL DEFAULT true,
+  created_by     uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_reports_tenant ON scheduled_reports(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_reports_dashboard ON scheduled_reports(dashboard_id);

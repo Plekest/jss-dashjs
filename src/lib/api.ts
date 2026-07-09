@@ -257,6 +257,108 @@ export const dashboardTemplatesApi = {
   remove: (id: string) => fetch(`/api/dashboard-templates/${id}`, { method: 'DELETE' }),
 }
 
+export type Aggregation = 'sum' | 'mean' | 'count' | 'max' | 'min'
+export type ThresholdOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq'
+
+export interface Alert {
+  id: string
+  datasetId: string
+  name: string
+  columnName: string
+  aggregation: Aggregation
+  operator: ThresholdOperator
+  threshold: number
+  recipients: string[]
+  renotifyAfterMinutes: number | null
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AlertEvent {
+  id: string
+  alertId: string
+  triggeredAt: string
+  resolvedAt: string | null
+  value: number
+  notifiedAt: string
+}
+
+export const alertsApi = {
+  list: (datasetId?: string) =>
+    fetch(`/api/alerts${datasetId ? `?datasetId=${datasetId}` : ''}`).then(json<Alert[]>),
+
+  get: (id: string) => fetch(`/api/alerts/${id}`).then(json<Alert>),
+
+  create: (d: {
+    datasetId: string; name: string; columnName: string; aggregation: Aggregation
+    operator: ThresholdOperator; threshold: number; recipients: string[]; renotifyAfterMinutes?: number | null
+  }) =>
+    fetch('/api/alerts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<Alert>),
+
+  update: (id: string, d: Partial<{
+    name: string; columnName: string; aggregation: Aggregation; operator: ThresholdOperator
+    threshold: number; recipients: string[]; renotifyAfterMinutes: number | null; active: boolean
+  }>) =>
+    fetch(`/api/alerts/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<Alert>),
+
+  remove: (id: string) => fetch(`/api/alerts/${id}`, { method: 'DELETE' }),
+
+  listEvents: (id: string) => fetch(`/api/alerts/${id}/events`).then(json<AlertEvent[]>),
+}
+
+export interface ReportMetric {
+  label: string
+  column: string
+  aggregation: Aggregation
+}
+
+export interface ScheduledReport {
+  id: string
+  dashboardId: string
+  name: string
+  metrics: ReportMetric[]
+  recipients: string[]
+  cron: string
+  nextRunAt: string
+  lastRunAt: string | null
+  lastRunError: string | null
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export const scheduledReportsApi = {
+  list: (dashboardId?: string) =>
+    fetch(`/api/scheduled-reports${dashboardId ? `?dashboardId=${dashboardId}` : ''}`).then(json<ScheduledReport[]>),
+
+  get: (id: string) => fetch(`/api/scheduled-reports/${id}`).then(json<ScheduledReport>),
+
+  create: (d: { dashboardId: string; name: string; metrics: ReportMetric[]; recipients: string[]; cron: string }) =>
+    fetch('/api/scheduled-reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<ScheduledReport>),
+
+  update: (id: string, d: Partial<{ name: string; metrics: ReportMetric[]; recipients: string[]; cron: string; active: boolean }>) =>
+    fetch(`/api/scheduled-reports/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<ScheduledReport>),
+
+  remove: (id: string) => fetch(`/api/scheduled-reports/${id}`, { method: 'DELETE' }),
+}
+
 export const publicApi = {
   get: (slug: string) =>
     fetch(`/api/public/${slug}`).then(json<PublicDashboard>),

@@ -24,9 +24,11 @@ import ShareIcon from '@mui/icons-material/Share'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import HistoryIcon from '@mui/icons-material/History'
 import BookmarkAddIcon from '@mui/icons-material/BookmarkAdd'
+import EventNoteIcon from '@mui/icons-material/EventNote'
 import { DashjsMount } from '../components/DashjsMount'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { VersionsPanel } from '../components/VersionsPanel'
+import { ScheduledReportsPanel } from '../components/ScheduledReportsPanel'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
 import { loadDashboard, createEmptyDashboard } from '../lib/dashboardsStorage'
@@ -55,6 +57,7 @@ export function DashboardEditorPage() {
 
   const [shareOpen, setShareOpen] = useState(false)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [reportsOpen, setReportsOpen] = useState(false)
   const [shareInfo, setShareInfo] = useState<{ slug: string | null; published: boolean } | null>(null)
   const [sharing, setSharing] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -384,6 +387,17 @@ export function DashboardEditorPage() {
           <Button
             size="small"
             variant="outlined"
+            startIcon={<EventNoteIcon />}
+            onClick={() => setReportsOpen(true)}
+          >
+            Relatórios agendados
+          </Button>
+        )}
+
+        {id && !isViewer && (
+          <Button
+            size="small"
+            variant="outlined"
             startIcon={<ShareIcon />}
             onClick={() => setShareOpen(true)}
           >
@@ -463,6 +477,16 @@ export function DashboardEditorPage() {
           open={versionsOpen}
           onClose={() => setVersionsOpen(false)}
           dashboardId={id}
+          canEdit={!isViewer}
+        />
+      )}
+
+      {id && (
+        <ScheduledReportsPanel
+          open={reportsOpen}
+          onClose={() => setReportsOpen(false)}
+          dashboardId={id}
+          columns={activeDataset?.columns ?? []}
           canEdit={!isViewer}
         />
       )}
