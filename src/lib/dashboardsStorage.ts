@@ -1,5 +1,5 @@
 import type { DashboardFull } from 'dashjs'
-import { dashboardsApi } from './api'
+import { dashboardsApi, dashboardTemplatesApi } from './api'
 import type { DashboardTemplate } from './templates/types'
 
 export interface DashboardMeta {
@@ -62,5 +62,15 @@ export async function createAndSaveDashboardFromTemplate(
 ): Promise<{ id: string; dashboard: DashboardFull }> {
   const dashboard = { ...template.build(), dashboard_name: name }
   const row = await dashboardsApi.create({ name, definition: dashboard })
+  return { id: row.id, dashboard }
+}
+
+export async function createAndSaveDashboardFromSavedTemplate(
+  name: string,
+  templateId: string,
+): Promise<{ id: string; dashboard: DashboardFull }> {
+  const template = await dashboardTemplatesApi.get(templateId)
+  const dashboard = { ...(template.definition as DashboardFull), dashboard_name: name }
+  const row = await dashboardsApi.create({ name, definition: dashboard, datasetId: template.datasetId })
   return { id: row.id, dashboard }
 }

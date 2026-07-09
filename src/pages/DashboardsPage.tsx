@@ -6,6 +6,7 @@ import {
   Card,
   CardActionArea,
   CardContent,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -26,10 +27,12 @@ import {
   listDashboards,
   createAndSaveDashboard,
   createAndSaveDashboardFromTemplate,
+  createAndSaveDashboardFromSavedTemplate,
   deleteDashboard,
   type DashboardMeta,
 } from '../lib/dashboardsStorage'
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '../lib/templates'
+import { dashboardTemplatesApi, type DashboardTemplateMeta } from '../lib/api'
 import { useAuth } from '../stores/authStore'
 
 export function DashboardsPage() {
@@ -41,9 +44,10 @@ export function DashboardsPage() {
   const [loadingList, setLoadingList] = useState(false)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [newDialogStep, setNewDialogStep] = useState<'gallery' | 'name'>('gallery')
-  const [selectedStart, setSelectedStart] = useState<'blank' | DashboardTemplate | null>(null)
+  const [selectedStart, setSelectedStart] = useState<'blank' | DashboardTemplate | DashboardTemplateMeta | null>(null)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [customTemplates, setCustomTemplates] = useState<DashboardTemplateMeta[]>([])
 
   const reload = useCallback(async () => {
     setLoadingList(true)
@@ -76,6 +80,14 @@ export function DashboardsPage() {
     setSelectedStart(null)
     setNewName('')
     setNewDialogOpen(true)
+    dashboardTemplatesApi.list().then(setCustomTemplates)
+  }
+
+  async function handleRemoveCustomTemplate(templateId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm('Remover este template?')) return
+    await dashboardTemplatesApi.remove(templateId)
+    setCustomTemplates(await dashboardTemplatesApi.list())
   }
 
   function chooseBlank() {
@@ -90,6 +102,12 @@ export function DashboardsPage() {
     setNewDialogStep('name')
   }
 
+  function chooseCustomTemplate(template: DashboardTemplateMeta) {
+    setSelectedStart(template)
+    setNewName(template.name)
+    setNewDialogStep('name')
+  }
+
   async function handleCreate() {
     if (!newName.trim() || !selectedStart) return
     setCreating(true)
@@ -97,7 +115,9 @@ export function DashboardsPage() {
       const { id } =
         selectedStart === 'blank'
           ? await createAndSaveDashboard(newName.trim())
-          : await createAndSaveDashboardFromTemplate(newName.trim(), selectedStart)
+          : 'build' in selectedStart
+            ? await createAndSaveDashboardFromTemplate(newName.trim(), selectedStart)
+            : await createAndSaveDashboardFromSavedTemplate(newName.trim(), selectedStart.id)
       setNewDialogOpen(false)
       setNewName('')
       navigate(`/dashboards/${id}`)
@@ -236,6 +256,33 @@ export function DashboardsPage() {
                           </Typography>
                         </CardContent>
                       </CardActionArea>
+                    </Card>
+                  </Grid>
+                ))}
+                {customTemplates.map((template) => (
+                  <Grid item xs={12} sm={6} key={template.id}>
+                    <Card variant="outlined" sx={{ height: '100%', position: 'relative' }}>
+                      <CardActionArea onClick={() => chooseCustomTemplate(template)} sx={{ height: '100%', p: 0.5 }}>
+                        <CardContent>
+                          <DashboardIcon sx={{ color: 'primary.main', mb: 1, fontSize: 32 }} />
+                          <Typography variant="subtitle1" fontWeight={600}>
+                            {template.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                            {template.description}
+                          </Typography>
+                          <Chip label="Da equipe" size="small" />
+                        </CardContent>
+                      </CardActionArea>
+                      {canEdit && (
+                        <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
+                          <Tooltip title="Remover template">
+                            <IconButton size="small" onClick={(e) => handleRemoveCustomTemplate(template.id, e)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      )}
                     </Card>
                   </Grid>
                 ))}

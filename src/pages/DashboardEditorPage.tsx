@@ -23,6 +23,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ShareIcon from '@mui/icons-material/Share'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import HistoryIcon from '@mui/icons-material/History'
+import BookmarkAddIcon from '@mui/icons-material/BookmarkAdd'
 import { DashjsMount } from '../components/DashjsMount'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { VersionsPanel } from '../components/VersionsPanel'
@@ -30,7 +31,7 @@ import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
 import { loadDashboard, createEmptyDashboard } from '../lib/dashboardsStorage'
 import { licenseKey } from '../lib/license'
-import { dashboardsApi, datasetsApi, type Dataset } from '../lib/api'
+import { dashboardsApi, dashboardTemplatesApi, datasetsApi, type Dataset } from '../lib/api'
 import type { DashJsInstance, DashJsOptions, DashboardFull } from 'dashjs'
 import { GA4_COMING_SOON } from '../connectors/ga4Connector'
 import { useAuth } from '../stores/authStore'
@@ -57,6 +58,11 @@ export function DashboardEditorPage() {
   const [shareInfo, setShareInfo] = useState<{ slug: string | null; published: boolean } | null>(null)
   const [sharing, setSharing] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  const [templateName, setTemplateName] = useState('')
+  const [templateDescription, setTemplateDescription] = useState('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
 
   // Unsaved-changes guard for in-app navigation away from the editor (e.g.
   // the "Dashboards" back button). Real tab/window close is guarded
@@ -251,6 +257,30 @@ export function DashboardEditorPage() {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  async function handleOpenSaveTemplate() {
+    if (instanceRef.current?.isDirty()) {
+      await instanceRef.current.save()
+      if (instanceRef.current.isDirty()) return
+    }
+    setTemplateName(dashboard?.dashboard_name ?? '')
+    setTemplateDescription('')
+    setSaveTemplateOpen(true)
+  }
+
+  async function handleSaveTemplate() {
+    if (!idRef.current || !templateName.trim()) return
+    setSavingTemplate(true)
+    try {
+      await dashboardTemplatesApi.create(idRef.current, {
+        name: templateName.trim(),
+        description: templateDescription.trim() || undefined,
+      })
+      setSaveTemplateOpen(false)
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
   if (loading || !dashboard) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -343,6 +373,17 @@ export function DashboardEditorPage() {
           <Button
             size="small"
             variant="outlined"
+            startIcon={<BookmarkAddIcon />}
+            onClick={handleOpenSaveTemplate}
+          >
+            Salvar como template
+          </Button>
+        )}
+
+        {id && !isViewer && (
+          <Button
+            size="small"
+            variant="outlined"
             startIcon={<ShareIcon />}
             onClick={() => setShareOpen(true)}
           >
@@ -382,6 +423,38 @@ export function DashboardEditorPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShareOpen(false)}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={saveTemplateOpen} onClose={() => setSaveTemplateOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Salvar como template</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Nome do template"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+          />
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            label="Descrição (opcional)"
+            value={templateDescription}
+            onChange={(e) => setTemplateDescription(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSaveTemplateOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveTemplate}
+            disabled={!templateName.trim() || savingTemplate}
+            startIcon={savingTemplate ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            Salvar
+          </Button>
         </DialogActions>
       </Dialog>
 

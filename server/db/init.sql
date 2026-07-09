@@ -120,3 +120,15 @@ CREATE TABLE IF NOT EXISTS dashboard_versions (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_dashboard_versions_dashboard ON dashboard_versions(dashboard_id);
+
+CREATE TABLE IF NOT EXISTS dashboard_templates (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name        text NOT NULL,
+  description text,
+  definition  jsonb NOT NULL,
+  dataset_id  uuid REFERENCES datasets(id) ON DELETE SET NULL,
+  created_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_templates_tenant ON dashboard_templates(tenant_id);

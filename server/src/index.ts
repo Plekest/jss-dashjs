@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import datasetsRouter from './routes/datasets.js'
 import dashboardsRouter from './routes/dashboards.js'
+import dashboardTemplatesRouter from './routes/dashboardTemplates.js'
 import connectionsRouter from './routes/connections.js'
 import publicRouter from './routes/public.js'
 import authRouter from './routes/auth.js'
@@ -20,6 +21,7 @@ app.use('/api/auth', authRouter)
 app.use('/api/members', membersRouter)
 app.use('/api/datasets', datasetsRouter)
 app.use('/api/dashboards', dashboardsRouter)
+app.use('/api/dashboard-templates', dashboardTemplatesRouter)
 app.use('/api/connections', connectionsRouter)
 app.use('/api/public', publicRouter)
 app.get('/api/health', (_req, res) => res.json({ ok: true }))

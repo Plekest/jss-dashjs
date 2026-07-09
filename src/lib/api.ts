@@ -229,6 +229,34 @@ export const dashboardVersionsApi = {
     ),
 }
 
+export interface DashboardTemplateMeta {
+  id: string
+  name: string
+  description: string | null
+  datasetId: string | null
+  createdAt: string
+  createdByName: string | null
+}
+
+export interface DashboardTemplateRecord extends DashboardTemplateMeta {
+  definition: object
+}
+
+export const dashboardTemplatesApi = {
+  list: () => fetch('/api/dashboard-templates').then(json<DashboardTemplateMeta[]>),
+
+  get: (id: string) => fetch(`/api/dashboard-templates/${id}`).then(json<DashboardTemplateRecord>),
+
+  create: (dashboardId: string, d: { name: string; description?: string }) =>
+    fetch('/api/dashboard-templates', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dashboardId, ...d }),
+    }).then(json<DashboardTemplateMeta>),
+
+  remove: (id: string) => fetch(`/api/dashboard-templates/${id}`, { method: 'DELETE' }),
+}
+
 export const publicApi = {
   get: (slug: string) =>
     fetch(`/api/public/${slug}`).then(json<PublicDashboard>),
