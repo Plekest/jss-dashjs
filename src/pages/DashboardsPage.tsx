@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
@@ -33,6 +33,7 @@ import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '../lib/templates'
 
 export function DashboardsPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [dashboards, setDashboards] = useState<DashboardMeta[]>([])
   const [loadingList, setLoadingList] = useState(false)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
@@ -53,6 +54,19 @@ export function DashboardsPage() {
   useEffect(() => {
     reload()
   }, [reload])
+
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    openNewDialog()
+    setSearchParams(
+      (params) => {
+        params.delete('new')
+        return params
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   function openNewDialog() {
     setNewDialogStep('gallery')

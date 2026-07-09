@@ -1,16 +1,19 @@
 import { useEffect, useRef } from 'react'
 import dashjs from 'dashjs'
 import 'dashjs/styles'
-import type { DashJsOptions } from 'dashjs'
+import type { DashJsInstance, DashJsOptions } from 'dashjs'
 import { useColorMode } from '../theme/colorMode'
 
 interface Props {
   options: DashJsOptions
   style?: React.CSSProperties
   colorMode?: 'light' | 'dark'
+  /** Called once the dashjs instance is mounted, so the parent can call
+   *  instance.save()/flushDraft()/isDirty() (e.g. to guard navigation). */
+  onReady?: (instance: DashJsInstance) => void
 }
 
-export function DashjsMount({ options, style, colorMode }: Props) {
+export function DashjsMount({ options, style, colorMode, onReady }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const { mode: globalMode } = useColorMode()
   const effectiveMode = colorMode ?? globalMode
@@ -21,10 +24,13 @@ export function DashjsMount({ options, style, colorMode }: Props) {
   optionsRef.current = options
   const modeRef = useRef(effectiveMode)
   modeRef.current = effectiveMode
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
 
   useEffect(() => {
     if (!ref.current) return
     const instance = dashjs(ref.current, { ...optionsRef.current, theme: modeRef.current })
+    onReadyRef.current?.(instance)
     return () => instance.destroy()
     // Empty deps: dashjs manages its own state internally; re-mounting would
     // destroy the editor. The parent must pass a stable `options` via useMemo.

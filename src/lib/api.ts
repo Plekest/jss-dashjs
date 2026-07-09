@@ -44,6 +44,7 @@ export interface DashboardMeta {
   slug: string | null
   published: boolean
   publishedAt: string | null
+  pinned: boolean
   createdAt: string
   updatedAt: string
 }
@@ -185,6 +186,12 @@ export const dashboardsApi = {
 
   unpublish: (id: string) =>
     fetch(`/api/dashboards/${id}/unpublish`, { method: 'POST' }).then(json<DashboardMeta>),
+
+  pin: (id: string) =>
+    fetch(`/api/dashboards/${id}/pin`, { method: 'POST' }).then(json<DashboardMeta>),
+
+  unpin: (id: string) =>
+    fetch(`/api/dashboards/${id}/unpin`, { method: 'POST' }).then(json<DashboardMeta>),
 }
 
 export const publicApi = {

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS dashboards (
 ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS slug text UNIQUE;
 ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT false;
 ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS published_at timestamptz;
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS pinned boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS connections (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

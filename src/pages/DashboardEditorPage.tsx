@@ -23,12 +23,13 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ShareIcon from '@mui/icons-material/Share'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { DashjsMount } from '../components/DashjsMount'
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
 import { loadDashboard, createEmptyDashboard } from '../lib/dashboardsStorage'
 import { licenseKey } from '../lib/license'
 import { dashboardsApi, datasetsApi, type Dataset } from '../lib/api'
-import type { DashJsOptions, DashboardFull } from 'dashjs'
+import type { DashJsInstance, DashJsOptions, DashboardFull } from 'dashjs'
 import { GA4_COMING_SOON } from '../connectors/ga4Connector'
 
 export function DashboardEditorPage() {
@@ -50,6 +51,66 @@ export function DashboardEditorPage() {
   const [shareInfo, setShareInfo] = useState<{ slug: string | null; published: boolean } | null>(null)
   const [sharing, setSharing] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  // Unsaved-changes guard for in-app navigation away from the editor (e.g.
+  // the "Dashboards" back button). Real tab/window close is guarded
+  // separately by dashjs's own beforeunload handler.
+  const instanceRef = useRef<DashJsInstance | null>(null)
+  const isDirtyRef = useRef(false)
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
+  const [savingBeforeLeave, setSavingBeforeLeave] = useState(false)
+  const pendingLeaveRef = useRef<(() => void) | null>(null)
+
+  const stableOnReady = useCallback((instance: DashJsInstance) => {
+    instanceRef.current = instance
+  }, [])
+
+  const stableOnDirtyChange = useCallback((dirty: boolean) => {
+    isDirtyRef.current = dirty
+  }, [])
+
+  // Runs `action` immediately if there are no unsaved changes, otherwise
+  // opens the confirm dialog and defers `action` until the user picks
+  // Save or Discard.
+  const attemptLeave = useCallback((action: () => void) => {
+    if (!isDirtyRef.current) {
+      action()
+      return
+    }
+    pendingLeaveRef.current = action
+    setLeaveDialogOpen(true)
+  }, [])
+
+  const handleDiscardAndLeave = useCallback(() => {
+    // Flush the latest edits to the recovery draft before discarding, so
+    // they're still there to restore next time this dashboard is opened.
+    instanceRef.current?.flushDraft()
+    setLeaveDialogOpen(false)
+    pendingLeaveRef.current?.()
+    pendingLeaveRef.current = null
+  }, [])
+
+  const handleSaveAndLeave = useCallback(async () => {
+    setSavingBeforeLeave(true)
+    try {
+      await instanceRef.current?.save()
+      if (instanceRef.current?.isDirty()) {
+        // save() logs its own errors and never rethrows — a still-dirty
+        // instance after awaiting it means onSave failed. Stay put.
+        return
+      }
+      setLeaveDialogOpen(false)
+      pendingLeaveRef.current?.()
+      pendingLeaveRef.current = null
+    } finally {
+      setSavingBeforeLeave(false)
+    }
+  }, [])
+
+  const handleCancelLeave = useCallback(() => {
+    setLeaveDialogOpen(false)
+    pendingLeaveRef.current = null
+  }, [])
 
   // Bumped when the user switches datasets — forces a clean re-mount of
   // DashjsMount so dashjs re-runs loadFields() with the new dataSource.
@@ -134,6 +195,7 @@ export function DashboardEditorPage() {
       // licensed too. undefined = degraded mode, same as today.
       license: licenseKey,
       initialPanels: { data: true, properties: true },
+      onDirtyChange: stableOnDirtyChange,
     }),
     // Re-create only when dashboard changes (e.g. on initial load).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,7 +271,7 @@ export function DashboardEditorPage() {
         <Button
           size="small"
           startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/dashboards')}
+          onClick={() => attemptLeave(() => navigate('/dashboards'))}
           sx={{ mr: 1 }}
         >
           Dashboards
@@ -305,6 +367,14 @@ export function DashboardEditorPage() {
         </DialogActions>
       </Dialog>
 
+      <UnsavedChangesDialog
+        open={leaveDialogOpen}
+        saving={savingBeforeLeave}
+        onSave={handleSaveAndLeave}
+        onDiscard={handleDiscardAndLeave}
+        onCancel={handleCancelLeave}
+      />
+
       {/* dashjs editor — key = id + mountKey ensures a clean re-mount
           whenever the user switches the data source.
           isolation:isolate creates a stacking context so dashjs internal
@@ -314,6 +384,7 @@ export function DashboardEditorPage() {
           key={`${id ?? 'new'}-${mountKey}`}
           options={options}
           style={{ height: '100%' }}
+          onReady={stableOnReady}
         />
       </Box>
     </Box>

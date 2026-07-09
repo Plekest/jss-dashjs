@@ -7,7 +7,7 @@ const router = Router()
 // List metadata
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(
-    'SELECT id, name, dataset_id, slug, published, published_at, created_at, updated_at FROM dashboards ORDER BY updated_at DESC',
+    'SELECT id, name, dataset_id, slug, published, published_at, pinned, created_at, updated_at FROM dashboards ORDER BY updated_at DESC',
   )
   res.json(rows.map(toCamel))
 })
@@ -85,6 +85,18 @@ router.post('/:id/unpublish', async (req, res) => {
   res.json(toCamel(rows[0]))
 })
 
+router.post('/:id/pin', async (req, res) => {
+  const { rows } = await pool.query(`UPDATE dashboards SET pinned = true WHERE id = $1 RETURNING *`, [req.params.id])
+  if (!rows.length) return res.status(404).json({ error: 'not found' })
+  res.json(toCamel(rows[0]))
+})
+
+router.post('/:id/unpin', async (req, res) => {
+  const { rows } = await pool.query(`UPDATE dashboards SET pinned = false WHERE id = $1 RETURNING *`, [req.params.id])
+  if (!rows.length) return res.status(404).json({ error: 'not found' })
+  res.json(toCamel(rows[0]))
+})
+
 function toCamel(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -94,6 +106,7 @@ function toCamel(row: Record<string, unknown>) {
     slug: row.slug,
     published: row.published,
     publishedAt: row.published_at,
+    pinned: row.pinned,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
