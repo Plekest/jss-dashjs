@@ -53,3 +53,70 @@ ALTER TABLE datasets ADD COLUMN IF NOT EXISTS refresh_interval_minutes integer;
 ALTER TABLE datasets ADD COLUMN IF NOT EXISTS next_refresh_at timestamptz;
 ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_refreshed_at timestamptz;
 ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_refresh_error text;
+
+CREATE TABLE IF NOT EXISTS tenants (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  name          text NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_memberships (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       text NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, user_id)
+);
+
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS tenant_id uuid REFERENCES tenants(id) ON DELETE CASCADE;
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS tenant_id uuid REFERENCES tenants(id) ON DELETE CASCADE;
+ALTER TABLE connections ADD COLUMN IF NOT EXISTS tenant_id uuid REFERENCES tenants(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_datasets_tenant ON datasets(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_dashboards_tenant ON dashboards(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_connections_tenant ON connections(tenant_id);
+
+CREATE TABLE IF NOT EXISTS invites (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  email       text NOT NULL,
+  role        text NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+  token       text NOT NULL UNIQUE,
+  invited_by  uuid NOT NULL REFERENCES users(id),
+  expires_at  timestamptz NOT NULL,
+  accepted_at timestamptz,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token      text NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  used_at    timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
+
+CREATE TABLE IF NOT EXISTS dashboard_versions (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  dashboard_id uuid NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+  tenant_id    uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name         text,
+  definition   jsonb NOT NULL,
+  created_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_versions_dashboard ON dashboard_versions(dashboard_id);
