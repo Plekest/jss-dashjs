@@ -62,6 +62,9 @@ export interface DashboardRecord extends DashboardMeta {
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    if (res.status === 401) {
+      window.dispatchEvent(new Event('auth:unauthorized'))
+    }
     const text = await res.text()
     throw new Error(`API ${res.status}: ${text}`)
   }
@@ -194,7 +197,179 @@ export const dashboardsApi = {
     fetch(`/api/dashboards/${id}/unpin`, { method: 'POST' }).then(json<DashboardMeta>),
 }
 
+export interface DashboardVersionMeta {
+  id: string
+  name: string | null
+  createdAt: string
+  createdBy: string | null
+  createdByName: string | null
+}
+
+export interface DashboardVersion extends DashboardVersionMeta {
+  definition: object
+}
+
+export const dashboardVersionsApi = {
+  list: (dashboardId: string) =>
+    fetch(`/api/dashboards/${dashboardId}/versions`).then(json<DashboardVersionMeta[]>),
+
+  get: (dashboardId: string, versionId: string) =>
+    fetch(`/api/dashboards/${dashboardId}/versions/${versionId}`).then(json<DashboardVersion>),
+
+  create: (dashboardId: string, name?: string) =>
+    fetch(`/api/dashboards/${dashboardId}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then(json<DashboardVersionMeta>),
+
+  restore: (dashboardId: string, versionId: string) =>
+    fetch(`/api/dashboards/${dashboardId}/versions/${versionId}/restore`, { method: 'POST' }).then(
+      json<DashboardRecord>,
+    ),
+}
+
 export const publicApi = {
   get: (slug: string) =>
     fetch(`/api/public/${slug}`).then(json<PublicDashboard>),
+}
+
+export type Role = 'owner' | 'editor' | 'viewer'
+
+export interface AuthUser {
+  id: string
+  email: string
+  name: string
+}
+
+export interface AuthTenant {
+  id: string
+  name: string
+}
+
+export interface MeResponse {
+  user: AuthUser
+  tenant: AuthTenant
+  role: Role
+}
+
+export interface TenantSelectionResponse {
+  needsTenantSelection: true
+  tenants: { id: string; name: string }[]
+}
+
+export interface Member {
+  id: string
+  email: string
+  name: string
+  role: Role
+}
+
+export interface Invite {
+  id: string
+  email: string
+  role: Role
+  expiresAt: string
+  createdAt: string
+}
+
+export interface InvitePreview {
+  email: string
+  tenantName: string
+  role: Role
+  hasAccount: boolean
+}
+
+export const authApi = {
+  signup: (d: { name: string; email: string; password: string; tenantName: string }) =>
+    fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<MeResponse>),
+
+  login: (d: { email: string; password: string }) =>
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<MeResponse | TenantSelectionResponse>),
+
+  logout: () => fetch('/api/auth/logout', { method: 'POST' }),
+
+  me: () => fetch('/api/auth/me').then(json<MeResponse>),
+
+  updateProfile: (d: { name?: string; currentPassword?: string; newPassword?: string }) =>
+    fetch('/api/auth/me', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<{ user: AuthUser }>),
+
+  selectTenant: (tenantId: string) =>
+    fetch('/api/auth/select-tenant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tenantId }),
+    }).then(json<{ tenant: AuthTenant; role: Role }>),
+
+  forgotPassword: (email: string) =>
+    fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(json<{ ok: boolean }>),
+
+  resetPassword: (token: string, password: string) =>
+    fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    }).then(json<{ ok: boolean }>),
+
+  getInvite: (token: string) =>
+    fetch(`/api/auth/invites/${token}`).then(json<InvitePreview>),
+
+  acceptInvite: (token: string, d: { name: string; password: string }) =>
+    fetch(`/api/auth/invites/${token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(d),
+    }).then(json<MeResponse>),
+
+  acceptInviteExisting: (token: string) =>
+    fetch(`/api/auth/invites/${token}/accept-existing`, { method: 'POST' }).then(
+      json<{ tenant: AuthTenant; role: Role }>,
+    ),
+}
+
+export const membersApi = {
+  list: () => fetch('/api/members').then(json<Member[]>),
+
+  listInvites: () => fetch('/api/members/invites').then(json<Invite[]>),
+
+  invite: (email: string, role: Role) =>
+    fetch('/api/members/invites', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, role }),
+    }).then(json<Invite>),
+
+  revokeInvite: (id: string) => fetch(`/api/members/invites/${id}`, { method: 'DELETE' }),
+
+  updateRole: (userId: string, role: Role) =>
+    fetch(`/api/members/${userId}/role`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role }),
+    }).then(json<{ ok: boolean }>),
+
+  remove: (userId: string) => fetch(`/api/members/${userId}`, { method: 'DELETE' }),
+
+  updateTenant: (name: string) =>
+    fetch('/api/members/tenant', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then(json<{ tenant: AuthTenant }>),
 }
