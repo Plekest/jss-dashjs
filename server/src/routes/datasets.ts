@@ -1,38 +1,46 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
 import { runQuery } from '../queryEngine.js'
+import { requireAuth, requireRole, type AuthedRequest } from '../auth.js'
 
 const router = Router()
 
+router.use(requireAuth)
+
 // List metadata (no data column — keeps response light)
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { rows } = await pool.query(
     `SELECT id, name, source_type, row_count, connection_id, refresh_interval_minutes,
             next_refresh_at, last_refreshed_at, last_refresh_error, created_at, updated_at
-     FROM datasets ORDER BY updated_at DESC`,
+     FROM datasets WHERE tenant_id = $1 ORDER BY updated_at DESC`,
+    [auth.tenantId],
   )
   res.json(rows.map(toCamel))
 })
 
 // Get full dataset including data
 router.get('/:id', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM datasets WHERE id = $1', [req.params.id])
+  const { auth } = req as unknown as AuthedRequest
+  const { rows } = await pool.query('SELECT * FROM datasets WHERE id = $1 AND tenant_id = $2', [req.params.id, auth.tenantId])
   if (!rows.length) return res.status(404).json({ error: 'not found' })
   res.json(toCamel(rows[0]))
 })
 
 // Create dataset
-router.post('/', async (req, res) => {
+router.post('/', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { name, sourceType, columns, data } = req.body
   if (!name || !sourceType || !Array.isArray(columns) || !Array.isArray(data)) {
     return res.status(400).json({ error: 'name, sourceType, columns, data are required' })
   }
-  const dataset = await insertDataset(name, sourceType, columns, data)
+  const dataset = await insertDataset(name, sourceType, columns, data, auth.tenantId)
   res.status(201).json(dataset)
 })
 
 // Update dataset (full rewrite — used by "Salvar" in Planilhas)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { name, columns, data, meta } = req.body
   const updates: string[] = []
   const values: unknown[] = []
@@ -49,9 +57,9 @@ router.put('/:id', async (req, res) => {
 
   if (!updates.length) return res.status(400).json({ error: 'nothing to update' })
 
-  values.push(req.params.id)
+  values.push(req.params.id, auth.tenantId)
   const { rows } = await pool.query(
-    `UPDATE datasets SET ${updates.join(', ')} WHERE id = $${i} RETURNING *`,
+    `UPDATE datasets SET ${updates.join(', ')} WHERE id = $${i} AND tenant_id = $${i + 1} RETURNING *`,
     values,
   )
   if (!rows.length) return res.status(404).json({ error: 'not found' })
@@ -59,28 +67,33 @@ router.put('/:id', async (req, res) => {
 })
 
 // Delete dataset
-router.delete('/:id', async (req, res) => {
-  await pool.query('DELETE FROM datasets WHERE id = $1', [req.params.id])
+router.delete('/:id', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
+  await pool.query('DELETE FROM datasets WHERE id = $1 AND tenant_id = $2', [req.params.id, auth.tenantId])
   res.status(204).end()
 })
 
 // Update the auto-refresh interval, recalculating next_refresh_at.
-router.put('/:id/refresh-schedule', async (req, res) => {
+router.put('/:id/refresh-schedule', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { refreshIntervalMinutes } = req.body as { refreshIntervalMinutes: number | null }
   const { rows } = await pool.query(
     `UPDATE datasets SET refresh_interval_minutes = $1,
             next_refresh_at = CASE WHEN $1::int IS NOT NULL THEN now() + ($1 || ' minutes')::interval ELSE NULL END
-     WHERE id = $2 RETURNING *`,
-    [refreshIntervalMinutes, req.params.id],
+     WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+    [refreshIntervalMinutes, req.params.id, auth.tenantId],
   )
   if (!rows.length) return res.status(404).json({ error: 'not found' })
   res.json(toCamel(rows[0]))
 })
 
 // Force an immediate refresh, without waiting for the schedule.
-router.post('/:id/refresh-now', async (req, res) => {
+router.post('/:id/refresh-now', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   try {
-    await refreshDataset(req.params.id)
+    const { rows: owned } = await pool.query('SELECT 1 FROM datasets WHERE id = $1 AND tenant_id = $2', [req.params.id, auth.tenantId])
+    if (!owned.length) return res.status(404).json({ error: 'not found' })
+    await refreshDataset(req.params.id as string)
     const { rows } = await pool.query('SELECT * FROM datasets WHERE id = $1', [req.params.id])
     if (!rows.length) return res.status(404).json({ error: 'not found' })
     res.json(toCamel(rows[0]))
@@ -115,12 +128,14 @@ export async function insertDataset(
   sourceType: string,
   columns: unknown[],
   data: unknown[][],
+  tenantId: string,
   origin?: { connectionId: string; sourceSql: string; refreshIntervalMinutes: number | null },
 ) {
   const { rows } = await pool.query(
-    `INSERT INTO datasets (name, source_type, columns, data, row_count, connection_id, source_sql, refresh_interval_minutes, next_refresh_at)
+    `INSERT INTO datasets (name, source_type, columns, data, row_count, connection_id, source_sql, refresh_interval_minutes, next_refresh_at, tenant_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-             CASE WHEN $8::int IS NOT NULL THEN now() + ($8 || ' minutes')::interval ELSE NULL END)
+             CASE WHEN $8::int IS NOT NULL THEN now() + ($8 || ' minutes')::interval ELSE NULL END,
+             $9)
      RETURNING *`,
     [
       name,
@@ -131,6 +146,7 @@ export async function insertDataset(
       origin?.connectionId ?? null,
       origin?.sourceSql ?? null,
       origin?.refreshIntervalMinutes ?? null,
+      tenantId,
     ],
   )
   return toCamel(rows[0])

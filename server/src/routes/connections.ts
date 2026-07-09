@@ -3,8 +3,20 @@ import { pool } from '../db.js'
 import { encrypt } from '../crypto.js'
 import { runQuery, runQueryAdhoc } from '../queryEngine.js'
 import { insertDataset } from './datasets.js'
+import { requireAuth, requireRole, type AuthedRequest } from '../auth.js'
 
 const router = Router()
+
+router.use(requireAuth)
+
+// Guards the 3 routes below that run a query against a connection's stored
+// credentials (`/:id/test`, `/:id/preview`, `/:id/ingest`) — without this,
+// a user could guess another tenant's connection UUID and run a query
+// against their credentials.
+async function assertOwnedByTenant(id: string, tenantId: string) {
+  const { rows } = await pool.query('SELECT 1 FROM connections WHERE id = $1 AND tenant_id = $2', [id, tenantId])
+  if (!rows.length) throw new Error('connection not found')
+}
 
 function toCamel(row: Record<string, unknown>) {
   return {
@@ -45,15 +57,18 @@ function parseCredentials(type: string, credentials: unknown): Record<string, un
 }
 
 // List connections (no credentials field)
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { rows } = await pool.query(
-    'SELECT id, name, type, config, created_at, updated_at FROM connections ORDER BY updated_at DESC',
+    'SELECT id, name, type, config, created_at, updated_at FROM connections WHERE tenant_id = $1 ORDER BY updated_at DESC',
+    [auth.tenantId],
   )
   res.json(rows.map(toCamel))
 })
 
 // Create connection
-router.post('/', async (req, res) => {
+router.post('/', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { name, type, credentials, location } = req.body
   if (!name || !type || !credentials) {
     return res.status(400).json({ error: 'name, type, credentials are required' })
@@ -86,10 +101,10 @@ router.post('/', async (req, res) => {
   try {
     const encryptedCreds = encrypt(credsToEncrypt)
     const { rows } = await pool.query(
-      `INSERT INTO connections (name, type, config, credentials)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO connections (name, type, config, credentials, tenant_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, type, config, created_at, updated_at`,
-      [name, type, JSON.stringify(config), encryptedCreds],
+      [name, type, JSON.stringify(config), encryptedCreds, auth.tenantId],
     )
     res.status(201).json(toCamel(rows[0]))
   } catch (err) {
@@ -127,22 +142,25 @@ router.post('/preview-adhoc', async (req, res) => {
 // Delete connection. Refuses (409) if datasets still depend on it, unless
 // ?force=true — silently orphaning a dataset's scheduled refresh is the
 // exact bug this guard exists to prevent.
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const force = req.query.force === 'true'
   const { rows } = await pool.query(
-    'SELECT count(*)::int AS count FROM datasets WHERE connection_id = $1',
-    [req.params.id],
+    'SELECT count(*)::int AS count FROM datasets WHERE connection_id = $1 AND tenant_id = $2',
+    [req.params.id, auth.tenantId],
   )
   if (rows[0].count > 0 && !force) {
     return res.status(409).json({ datasetsAffected: rows[0].count })
   }
-  await pool.query('DELETE FROM connections WHERE id = $1', [req.params.id])
+  await pool.query('DELETE FROM connections WHERE id = $1 AND tenant_id = $2', [req.params.id, auth.tenantId])
   res.status(204).end()
 })
 
 // Test connection
 router.post('/:id/test', async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   try {
+    await assertOwnedByTenant(req.params.id, auth.tenantId)
     await runQuery(req.params.id, 'SELECT 1 AS ok', 1)
     res.json({ ok: true })
   } catch (err) {
@@ -153,9 +171,11 @@ router.post('/:id/test', async (req, res) => {
 
 // Preview query (no persist, 50 rows)
 router.post('/:id/preview', async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
   const { sql } = req.body
   if (!sql) return res.status(400).json({ error: 'sql is required' })
   try {
+    await assertOwnedByTenant(req.params.id, auth.tenantId)
     const result = await runQuery(req.params.id, sql, 50)
     res.json(result)
   } catch (err) {
@@ -165,15 +185,18 @@ router.post('/:id/preview', async (req, res) => {
 })
 
 // Ingest query → dataset (50k rows)
-router.post('/:id/ingest', async (req, res) => {
+router.post('/:id/ingest', requireRole('owner', 'editor'), async (req, res) => {
+  const { auth } = req as unknown as AuthedRequest
+  const id = req.params.id as string
   const { sql, name, refreshIntervalMinutes } = req.body
   if (!sql || !name) return res.status(400).json({ error: 'sql and name are required' })
   try {
-    const { columns, data } = await runQuery(req.params.id, sql, 50_000)
-    const { rows: connRows } = await pool.query('SELECT type FROM connections WHERE id=$1', [req.params.id])
+    await assertOwnedByTenant(id, auth.tenantId)
+    const { columns, data } = await runQuery(id, sql, 50_000)
+    const { rows: connRows } = await pool.query('SELECT type FROM connections WHERE id=$1', [id])
     const connType = connRows[0]?.type ?? 'unknown'
-    const dataset = await insertDataset(name, connType, columns, data, {
-      connectionId: req.params.id,
+    const dataset = await insertDataset(name, connType, columns, data, auth.tenantId, {
+      connectionId: id,
       sourceSql: sql,
       refreshIntervalMinutes: refreshIntervalMinutes ?? null,
     })
