@@ -12,7 +12,7 @@
 // DashboardEditorPage).
 //
 // Without a key nothing changes: same 'evaluation' licence as before, no
-// formula extension, no formula bar, /sheets stays the simple grid.
+// formula extension, no formula bar, the sheet editor stays the simple grid.
 
 import jspreadsheet from 'jspreadsheet'
 import formula from '@jspreadsheet/formula-pro'

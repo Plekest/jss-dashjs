@@ -12,7 +12,7 @@ export interface DatasetMeta {
   updatedAt: string
 }
 
-/** One tab of the rich /sheets editor (pro mode only). `data` holds the
+/** One tab of the rich sheet editor (pro mode only). `data` holds the
  *  calculated values (getData(true)); `formulas` holds the raw formulas
  *  (getData(false)) so the tab can reopen with fórmulas editable. */
 export interface DatasetWorksheet {

@@ -20,6 +20,8 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { AddDataSourceWizard } from '../components/AddDataSourceWizard'
 import { AlertsPanel } from '../components/AlertsPanel'
+import { SheetEditorPanel, type SheetEditorPanelHandle } from '../components/SheetEditorPanel'
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { connectionsApi, datasetsApi, type ConnectionMeta } from '../lib/api'
 import { useAuth } from '../stores/authStore'
 
@@ -35,7 +37,7 @@ function formatRows(n: number) {
 export function DataPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { datasets, loading, removeDataset, refresh, setActiveDataset } = useDatasetsStore()
+  const { datasets, loading, removeDataset, refresh } = useDatasetsStore()
   const { role } = useAuth()
   const canEdit = role !== 'viewer'
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -44,6 +46,46 @@ export function DataPage() {
   const [refreshingNow, setRefreshingNow] = useState(false)
   const [savingInterval, setSavingInterval] = useState(false)
   const [connections, setConnections] = useState<ConnectionMeta[]>([])
+
+  const sheetDirtyRef = useRef(false)
+  const sheetEditorRef = useRef<SheetEditorPanelHandle>(null)
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
+  const [savingBeforeLeave, setSavingBeforeLeave] = useState(false)
+  const pendingLeaveRef = useRef<(() => void) | null>(null)
+
+  function attemptLeaveSheet(action: () => void) {
+    if (tab !== 1 || !sheetDirtyRef.current) {
+      action()
+      return
+    }
+    pendingLeaveRef.current = action
+    setLeaveDialogOpen(true)
+  }
+
+  async function handleSaveAndLeaveSheet() {
+    setSavingBeforeLeave(true)
+    try {
+      await sheetEditorRef.current?.save()
+      if (sheetDirtyRef.current) return // save falhou — fica na tela
+      setLeaveDialogOpen(false)
+      pendingLeaveRef.current?.()
+      pendingLeaveRef.current = null
+    } finally {
+      setSavingBeforeLeave(false)
+    }
+  }
+
+  function handleDiscardAndLeaveSheet() {
+    sheetDirtyRef.current = false
+    setLeaveDialogOpen(false)
+    pendingLeaveRef.current?.()
+    pendingLeaveRef.current = null
+  }
+
+  function handleCancelLeaveSheet() {
+    setLeaveDialogOpen(false)
+    pendingLeaveRef.current = null
+  }
 
   useEffect(() => {
     connectionsApi.list().then(setConnections)
@@ -181,7 +223,7 @@ export function DataPage() {
               return (
                 <Box
                   key={ds.id}
-                  onClick={() => { setSelectedId(ds.id); setTab(0) }}
+                  onClick={() => attemptLeaveSheet(() => { setSelectedId(ds.id); setTab(0) })}
                   sx={{
                     px: 2,
                     py: 1.25,
@@ -205,32 +247,25 @@ export function DataPage() {
 
           {/* Detail */}
           {selected && (
-            <Box sx={{ flexGrow: 1, p: 3, overflow: 'auto', bgcolor: 'background.paper' }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>
-                {selected.name}
-              </Typography>
+            <Box sx={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
+              <Box sx={{ px: 3, pt: 3, pb: tab === 1 ? 0 : 2, flexShrink: 0 }}>
+                <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>
+                  {selected.name}
+                </Typography>
 
-              <Tabs
-                value={tab}
-                onChange={(_, value) => {
-                  if (value === 1) {
-                    // Sheets doesn't take a dataset via URL — it reads
-                    // activeDataset from the store, so this must run first.
-                    setActiveDataset(selected.id)
-                    navigate('/sheets')
-                    return
-                  }
-                  setTab(value)
-                }}
-                sx={{ mb: 2, minHeight: 36 }}
-              >
-                <Tab label="Overview" sx={{ minHeight: 36 }} />
-                <Tab label="Planilha" sx={{ minHeight: 36 }} />
-                <Tab label="Alertas" sx={{ minHeight: 36 }} />
-              </Tabs>
+                <Tabs
+                  value={tab}
+                  onChange={(_, value) => attemptLeaveSheet(() => setTab(value))}
+                  sx={{ minHeight: 36 }}
+                >
+                  <Tab label="Overview" sx={{ minHeight: 36 }} />
+                  <Tab label="Planilha" sx={{ minHeight: 36 }} />
+                  <Tab label="Alertas" sx={{ minHeight: 36 }} />
+                </Tabs>
+              </Box>
 
               {tab === 0 && (
-                <>
+                <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'auto', px: 3, pb: 3 }}>
                   <Box
                     sx={{
                       display: 'grid',
@@ -322,16 +357,37 @@ export function DataPage() {
                       </Button>
                     </Box>
                   )}
-                </>
+                </Box>
+              )}
+
+              {tab === 1 && (
+                <Box sx={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
+                  <SheetEditorPanel
+                    key={selected.id}
+                    ref={sheetEditorRef}
+                    datasetId={selected.id}
+                    onDirtyChange={(dirty) => { sheetDirtyRef.current = dirty }}
+                  />
+                </Box>
               )}
 
               {tab === 2 && (
-                <AlertsPanel datasetId={selected.id} canEdit={canEdit} />
+                <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'auto', px: 3, pb: 3 }}>
+                  <AlertsPanel datasetId={selected.id} canEdit={canEdit} />
+                </Box>
               )}
             </Box>
           )}
         </Box>
       )}
+
+      <UnsavedChangesDialog
+        open={leaveDialogOpen}
+        saving={savingBeforeLeave}
+        onSave={handleSaveAndLeaveSheet}
+        onDiscard={handleDiscardAndLeaveSheet}
+        onCancel={handleCancelLeaveSheet}
+      />
     </Box>
   )
 }

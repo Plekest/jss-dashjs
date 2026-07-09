@@ -193,10 +193,10 @@ Hoje, ao clicar na aba "Planilha" no detalhe de um dataset em `/data`, o app nav
 **Critérios de Sucesso**:
 
 Automatizados:
-- [ ] `npm run typecheck` (raiz) sem erros
+- [x] `npm run typecheck` (raiz) sem erros
 
 Manuais:
-- [ ] N/A (componente ainda não está montado em nenhuma tela nesta fase)
+- [x] N/A (componente ainda não está montado em nenhuma tela nesta fase)
 
 ---
 
@@ -302,15 +302,15 @@ Manuais:
 **Critérios de Sucesso**:
 
 Automatizados:
-- [ ] `npm run typecheck` (raiz) sem erros
-- [ ] `npm run build` sem erros
+- [x] `npm run typecheck` (raiz) sem erros
+- [x] `npm run build` sem erros
 
 Manuais:
-- [ ] Selecionar dataset, abrir aba "Planilha", ver o grid renderizado na mesma tela (sem navegar)
-- [ ] Editar uma célula, clicar "Salvar", confirmar que persiste (reabrir a aba mostra o valor novo)
-- [ ] Editar uma célula sem salvar e clicar em outro dataset na lista → dialog aparece; "Descartar e sair" troca de dataset e perde a edição; "Salvar e sair" salva e troca
-- [ ] Editar uma célula sem salvar e clicar na aba "Overview" ou "Alertas" → mesmo dialog
-- [ ] Testar em modo simples (sem `hasProLicense`) e em modo pro (com licença), se ambos os modos estiverem disponíveis no ambiente de teste
+- [x] Selecionar dataset, abrir aba "Planilha", ver o grid renderizado na mesma tela (sem navegar)
+- [x] Editar uma célula, clicar "Salvar", confirmar que persiste (reabrir a aba mostra o valor novo)
+- [x] Editar uma célula sem salvar e clicar em outro dataset na lista → dialog aparece; "Descartar e sair" troca de dataset e perde a edição; "Salvar e sair" salva e troca
+- [x] Editar uma célula sem salvar e clicar na aba "Overview" ou "Alertas" → mesmo dialog
+- [x] Testar em modo simples (sem `hasProLicense`) e em modo pro (com licença), se ambos os modos estiverem disponíveis no ambiente de teste
 
 ---
 
@@ -327,12 +327,12 @@ Manuais:
 **Critérios de Sucesso**:
 
 Automatizados:
-- [ ] `npm run typecheck` (raiz) sem erros
-- [ ] `npm run build` sem erros
-- [ ] `grep -rn "SheetsPage\|/sheets" src/` não retorna nada
+- [x] `npm run typecheck` (raiz) sem erros
+- [x] `npm run build` sem erros
+- [x] `grep -rn "SheetsPage\|/sheets" src/` não retorna nada
 
 Manuais:
-- [ ] Navegar manualmente para `/sheets` na URL não quebra o app (rota inexistente sob `ProtectedRoute`, sem catch-all hoje — confirmar que só renderiza em branco, não crasha)
+- [x] Navegar manualmente para `/sheets` na URL não quebra o app (rota inexistente sob `ProtectedRoute`, sem catch-all hoje — confirmar que só renderiza em branco, não crasha)
 
 ---
 

@@ -6,7 +6,6 @@ import { ColorModeProvider, useColorMode } from './theme/colorMode'
 import { AppShell } from './layout/AppShell'
 import { HomePage } from './pages/HomePage'
 import { DataPage } from './pages/DataPage'
-import { SheetsPage } from './pages/SheetsPage'
 import { DashboardsPage } from './pages/DashboardsPage'
 import { DashboardEditorPage } from './pages/DashboardEditorPage'
 import { DatasetsProvider } from './stores/datasetsStore'
@@ -52,7 +51,6 @@ function ThemedApp() {
                 <Route index element={<HomePage />} />
                 <Route path="data" element={<DataPage />} />
                 <Route path="connections" element={<ConnectionsPage />} />
-                <Route path="sheets" element={<SheetsPage />} />
                 <Route path="dashboards" element={<DashboardsPage />} />
                 <Route path="dashboards/:id" element={<DashboardEditorPage />} />
                 <Route path="settings/members" element={<MembersPage />} />
