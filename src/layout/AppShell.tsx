@@ -1,14 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   AppBar,
   Box,
+  Divider,
   Drawer,
   IconButton,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
+  Menu,
+  MenuItem,
   Toolbar,
   Tooltip,
   Typography,
@@ -17,12 +20,20 @@ import DashboardIcon from '@mui/icons-material/Dashboard'
 import AnalyticsIcon from '@mui/icons-material/Analytics'
 import StorageIcon from '@mui/icons-material/Storage'
 import HomeIcon from '@mui/icons-material/Home'
+import PeopleIcon from '@mui/icons-material/People'
 import Brightness4Icon from '@mui/icons-material/Brightness4'
 import Brightness7Icon from '@mui/icons-material/Brightness7'
 import SearchIcon from '@mui/icons-material/Search'
+import AccountCircleIcon from '@mui/icons-material/AccountCircle'
+import PersonIcon from '@mui/icons-material/Person'
+import BusinessIcon from '@mui/icons-material/Business'
+import LogoutIcon from '@mui/icons-material/Logout'
 import { useColorMode } from '../theme/colorMode'
 import { CommandPalette } from '../components/CommandPalette'
 import { useCommandPalette } from '../stores/commandPaletteStore'
+import { useAuth } from '../stores/authStore'
+import { ProfileDialog } from '../components/ProfileDialog'
+import { CompanyDialog } from '../components/CompanyDialog'
 
 const RAIL_WIDTH = 64
 
@@ -30,6 +41,7 @@ const navItems = [
   { label: 'Home', path: '/', icon: <HomeIcon /> },
   { label: 'Dados', path: '/data', icon: <StorageIcon /> },
   { label: 'Dashboards', path: '/dashboards', icon: <DashboardIcon /> },
+  { label: 'Membros', path: '/settings/members', icon: <PeopleIcon /> },
 ]
 
 export function AppShell() {
@@ -37,6 +49,18 @@ export function AppShell() {
   const location = useLocation()
   const { mode, toggle } = useColorMode()
   const { open: paletteOpen, setOpen: setPaletteOpen } = useCommandPalette()
+  const { user, tenant, role, logout } = useAuth()
+  const [userMenuAnchor, setUserMenuAnchor] = useState<HTMLElement | null>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [companyOpen, setCompanyOpen] = useState(false)
+
+  const visibleNavItems = navItems.filter((item) => item.path !== '/settings/members' || role !== 'viewer')
+
+  async function handleLogout() {
+    setUserMenuAnchor(null)
+    await logout()
+    navigate('/login')
+  }
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -96,6 +120,65 @@ export function AppShell() {
               {mode === 'light' ? <Brightness4Icon fontSize="small" /> : <Brightness7Icon fontSize="small" />}
             </IconButton>
           </Tooltip>
+          <IconButton
+            onClick={(e) => setUserMenuAnchor(e.currentTarget)}
+            size="small"
+            sx={{ ml: 0.5 }}
+            aria-label={user ? `${user.name} · ${tenant?.name ?? ''}` : 'Conta'}
+          >
+            <AccountCircleIcon fontSize="small" />
+          </IconButton>
+          <Menu
+            anchorEl={userMenuAnchor}
+            open={!!userMenuAnchor}
+            onClose={() => setUserMenuAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Box sx={{ px: 2, py: 1, minWidth: 180 }}>
+              <Typography variant="body2" fontWeight={600} noWrap>
+                {user?.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {tenant?.name}
+              </Typography>
+            </Box>
+            <Divider />
+            <MenuItem
+              onClick={() => {
+                setUserMenuAnchor(null)
+                setProfileOpen(true)
+              }}
+            >
+              <ListItemIcon>
+                <PersonIcon fontSize="small" />
+              </ListItemIcon>
+              Meu perfil
+            </MenuItem>
+            {role === 'owner' && (
+              <MenuItem
+                onClick={() => {
+                  setUserMenuAnchor(null)
+                  setCompanyOpen(true)
+                }}
+              >
+                <ListItemIcon>
+                  <BusinessIcon fontSize="small" />
+                </ListItemIcon>
+                Editar empresa
+              </MenuItem>
+            )}
+            <Divider />
+            <MenuItem onClick={handleLogout}>
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" />
+              </ListItemIcon>
+              Sair
+            </MenuItem>
+          </Menu>
+
+          <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
+          <CompanyDialog open={companyOpen} onClose={() => setCompanyOpen(false)} />
         </Toolbar>
       </AppBar>
 
@@ -114,7 +197,7 @@ export function AppShell() {
         }}
       >
         <List sx={{ pt: 1.5, width: '100%' }}>
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const active =
               item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)
             return (

@@ -30,9 +30,12 @@ import {
   type DashboardMeta,
 } from '../lib/dashboardsStorage'
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '../lib/templates'
+import { useAuth } from '../stores/authStore'
 
 export function DashboardsPage() {
   const navigate = useNavigate()
+  const { role } = useAuth()
+  const canEdit = role !== 'viewer'
   const [searchParams, setSearchParams] = useSearchParams()
   const [dashboards, setDashboards] = useState<DashboardMeta[]>([])
   const [loadingList, setLoadingList] = useState(false)
@@ -116,13 +119,15 @@ export function DashboardsPage() {
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
           Dashboards
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={openNewDialog}
-        >
-          Novo Dashboard
-        </Button>
+        {canEdit && (
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={openNewDialog}
+          >
+            Novo Dashboard
+          </Button>
+        )}
       </Box>
 
       {loadingList && !dashboards.length ? (
@@ -145,9 +150,11 @@ export function DashboardsPage() {
           <Typography variant="h6" color="text.secondary">
             Nenhum dashboard ainda
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openNewDialog}>
-            Criar primeiro dashboard
-          </Button>
+          {canEdit && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openNewDialog}>
+              Criar primeiro dashboard
+            </Button>
+          )}
         </Box>
       ) : (
         <Grid container spacing={2}>
@@ -180,11 +187,13 @@ export function DashboardsPage() {
                       <OpenInNewIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Remover">
-                    <IconButton size="small" onClick={(e) => handleDelete(d.id, e)}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+                  {canEdit && (
+                    <Tooltip title="Remover">
+                      <IconButton size="small" onClick={(e) => handleDelete(d.id, e)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Box>
               </Card>
             </Grid>

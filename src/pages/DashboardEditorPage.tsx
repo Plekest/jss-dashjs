@@ -22,8 +22,10 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ShareIcon from '@mui/icons-material/Share'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import HistoryIcon from '@mui/icons-material/History'
 import { DashjsMount } from '../components/DashjsMount'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
+import { VersionsPanel } from '../components/VersionsPanel'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { buildDataSource } from '../lib/buildDataSource'
 import { loadDashboard, createEmptyDashboard } from '../lib/dashboardsStorage'
@@ -31,11 +33,14 @@ import { licenseKey } from '../lib/license'
 import { dashboardsApi, datasetsApi, type Dataset } from '../lib/api'
 import type { DashJsInstance, DashJsOptions, DashboardFull } from 'dashjs'
 import { GA4_COMING_SOON } from '../connectors/ga4Connector'
+import { useAuth } from '../stores/authStore'
 
 export function DashboardEditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { datasets } = useDatasetsStore()
+  const { role } = useAuth()
+  const isViewer = role === 'viewer'
 
   const [dashboard, setDashboard] = useState<DashboardFull | null>(null)
   // True until both dashboard + saved dataset (if any) have loaded.
@@ -48,6 +53,7 @@ export function DashboardEditorPage() {
   const [loadingDataset, setLoadingDataset] = useState(false)
 
   const [shareOpen, setShareOpen] = useState(false)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const [shareInfo, setShareInfo] = useState<{ slug: string | null; published: boolean } | null>(null)
   const [sharing, setSharing] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -196,10 +202,11 @@ export function DashboardEditorPage() {
       license: licenseKey,
       initialPanels: { data: true, properties: true },
       onDirtyChange: stableOnDirtyChange,
+      readOnly: isViewer,
     }),
     // Re-create only when dashboard changes (e.g. on initial load).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dashboard],
+    [dashboard, isViewer],
   )
 
   async function handleSourceChange(value: string) {
@@ -325,6 +332,17 @@ export function DashboardEditorPage() {
           <Button
             size="small"
             variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={() => setVersionsOpen(true)}
+          >
+            Versões
+          </Button>
+        )}
+
+        {id && !isViewer && (
+          <Button
+            size="small"
+            variant="outlined"
             startIcon={<ShareIcon />}
             onClick={() => setShareOpen(true)}
           >
@@ -366,6 +384,15 @@ export function DashboardEditorPage() {
           <Button onClick={() => setShareOpen(false)}>Fechar</Button>
         </DialogActions>
       </Dialog>
+
+      {id && (
+        <VersionsPanel
+          open={versionsOpen}
+          onClose={() => setVersionsOpen(false)}
+          dashboardId={id}
+          canEdit={!isViewer}
+        />
+      )}
 
       <UnsavedChangesDialog
         open={leaveDialogOpen}

@@ -20,6 +20,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { useDatasetsStore } from '../stores/datasetsStore'
 import { AddDataSourceWizard } from '../components/AddDataSourceWizard'
 import { connectionsApi, datasetsApi, type ConnectionMeta } from '../lib/api'
+import { useAuth } from '../stores/authStore'
 
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -34,6 +35,8 @@ export function DataPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { datasets, loading, removeDataset, refresh, setActiveDataset } = useDatasetsStore()
+  const { role } = useAuth()
+  const canEdit = role !== 'viewer'
   const [wizardOpen, setWizardOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [refreshingNow, setRefreshingNow] = useState(false)
@@ -110,9 +113,11 @@ export function DataPage() {
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
           Dados
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
-          Nova fonte de dados
-        </Button>
+        {canEdit && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
+            Nova fonte de dados
+          </Button>
+        )}
       </Box>
 
       <AddDataSourceWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
@@ -140,9 +145,11 @@ export function DataPage() {
           <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
             Envie um arquivo CSV, Excel, JSON ou TSV, ou conecte um BigQuery/Postgres via SQL.
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
-            Nova fonte de dados
-          </Button>
+          {canEdit && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
+              Nova fonte de dados
+            </Button>
+          )}
         </Box>
       ) : (
         <Box
@@ -295,16 +302,18 @@ export function DataPage() {
                 </Box>
               )}
 
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon />}
-                  onClick={() => handleDelete(selected.id, selected.name)}
-                >
-                  Remover
-                </Button>
-              </Box>
+              {canEdit && (
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteOutlineIcon />}
+                    onClick={() => handleDelete(selected.id, selected.name)}
+                  >
+                    Remover
+                  </Button>
+                </Box>
+              )}
             </Box>
           )}
         </Box>

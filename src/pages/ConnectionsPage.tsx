@@ -23,12 +23,15 @@ import CableIcon from '@mui/icons-material/Cable'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { connectionsApi, type ConnectionMeta } from '../lib/api'
+import { useAuth } from '../stores/authStore'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
 export function ConnectionsPage() {
+  const { role } = useAuth()
+  const canEdit = role !== 'viewer'
   const [searchParams, setSearchParams] = useSearchParams()
   const [connections, setConnections] = useState<ConnectionMeta[]>([])
   const [loading, setLoading] = useState(true)
@@ -210,9 +213,11 @@ export function ConnectionsPage() {
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
           Gerenciar conexões
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-          Nova conexão
-        </Button>
+        {canEdit && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+            Nova conexão
+          </Button>
+        )}
       </Box>
 
       {error && (
@@ -232,9 +237,11 @@ export function ConnectionsPage() {
           <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
             Adicione uma conexão BigQuery usando um service account JSON para importar dados diretamente.
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-            Adicionar conexão
-          </Button>
+          {canEdit && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+              Adicionar conexão
+            </Button>
+          )}
         </Box>
       ) : (
         <Box
@@ -370,14 +377,16 @@ export function ConnectionsPage() {
                 >
                   {testStatus[selected.id] === 'testing' ? 'Testando…' : 'Testar conexão'}
                 </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon />}
-                  onClick={() => handleDelete(selected.id, selected.name)}
-                >
-                  Remover
-                </Button>
+                {canEdit && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteOutlineIcon />}
+                    onClick={() => handleDelete(selected.id, selected.name)}
+                  >
+                    Remover
+                  </Button>
+                )}
               </Box>
             </Box>
           )}
