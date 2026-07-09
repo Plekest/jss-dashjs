@@ -1,250 +1,215 @@
-# Plano de Implementação: Conector Postgres, Templates/Galeria, Brand Kit (paleta por dashboard)
+# Plano de Implementação: Unificar Conexões + Data Sets + Planilha num fluxo só
 
 ## Visão Geral
 
-Implementar as 3 próximas features do `ROADMAP-studio.md` ("Próximos 3 (nova rodada)"): (1) um segundo conector de dados SQL genérico — Postgres — generalizando a arquitetura hoje acoplada a BigQuery; (2) uma galeria de templates de dashboard com dado de exemplo embutido, como ponto de partida além de "em branco"; (3) uma paleta de cores de série por dashboard ("brand kit"), que vira o default de todo gráfico do dashboard que não tiver cor própria.
-
-**Decisões tomadas (confirmadas com o usuário antes deste plano):**
-1. Conector novo: **Postgres** (reaproveita driver `pg` já instalado no server, mesmo modelo de SQL arbitrário do BigQuery).
-2. Templates vêm **com dado de exemplo embutido** — dashboard funciona sozinho assim que criado, sem exigir dataset do usuário.
-3. Templates ficam **hardcoded no app** (biblioteca estática TS), sem tabela nova no banco nem UI de gerenciamento.
-4. Brand kit = **paleta de séries por dashboard** (lista de cores que vira default de todo gráfico sem paleta própria). Não mexe nas cores de chrome do editor (`--dashjs-accent` etc).
+Hoje o app tem 3 abas de nav lado a lado — Conexões, Data (datasets), Planilhas — e criar um dataset a partir de SQL exige sair da aba Data, ir pra Conexões, criar a conexão lá, voltar pra Data, abrir "Importar via SQL" e escolher a conexão num dropdown. Um usuário novo testando BigQuery se perdeu exatamente nesse salto entre abas. Este plano funde os 3 pontos de entrada num wizard único ("+ Nova fonte de dados"), rebaixa Conexões a uma tela de gerenciamento secundária (não mais item de nav principal) e faz Planilha virar uma aba dentro do dataset em vez de destino de nav global.
 
 ## Análise do Estado Atual
 
-Arquitetura: app React em `/home/fernandes/jss_dashjs` (rotas, CRUD, MUI chrome) + core package `dashjs` em `/home/fernandes/jspreadsheet/dashjs` (editor/engine, mounted via `src/components/DashjsMount.tsx`) + server Express em `/home/fernandes/jss_dashjs/server`.
+Arquitetura: SPA Vite+React+MUI em `src/` + API Express em `server/src/` + Postgres via `server/db/init.sql`. As 3 entidades já são agnósticas de tipo no schema — o problema é 100% de nav/wizard, não de dado.
 
-**Conectores — o que existe e o que está acoplado a BigQuery:**
-- `server/db/init.sql` — tabela `connections` já é agnóstica de tipo: `id, name, type text, config jsonb, credentials text`. Nenhuma migração de schema é necessária para o novo conector.
-- `server/src/crypto.ts` — AES-256-GCM sobre uma string plana (JSON serializado). Já reutilizável para qualquer shape de credencial.
-- `server/src/bigquery.ts` — único client hoje. `clientFor(connectionId)` busca a connection, decripta credenciais, instancia `new BigQuery(...)`. `runQuery(connectionId, sql, maxRows)` retorna `{ columns: {title}[], data: (string|number)[][] }` — formato de retorno já é agnóstico de fonte.
-- `server/src/routes/connections.ts:29-66` (`POST /`) — parsing de credenciais **hardcoded para shape service-account** (exige `project_id`, `client_email`, `private_key`). `POST /:id/ingest` (linha 99-114, pós Fase 2) chama `insertDataset(name, 'bigquery', ...)` — **`'bigquery'` é um literal fixo**, não deriva do tipo real da conexão.
-- `server/src/routes/datasets.ts` — `refreshDataset(id)` (adicionado na rodada anterior) importa `runQuery` direto de `./bigquery.js` — o refresh agendado só funciona pra BigQuery hoje, mesmo a tabela `datasets` já guardando `connection_id` de forma agnóstica.
-- `src/lib/api.ts:54-61` — `ConnectionMeta.config: { projectId?, clientEmail?, location? }` tipado só com campos BigQuery. `connectionsApi.create` (linha 66) tem `type: 'bigquery'` como literal fixo, não union.
-- `src/pages/ConnectionsPage.tsx` — formulário sem seletor de tipo (`form = {name, credentials, location}`, linha 32); título fixo "Nova conexão BigQuery" (linha 311); `handleCreate` (linha 99-121) manda `type: 'bigquery'` fixo (linha 109); painel de detalhe mostra `config.projectId`/`config.clientEmail` fixos (linhas 258-265).
-- `src/components/ImportBigQueryDialog.tsx:56` — filtra conexões com `c.type === 'bigquery'`; resto do fluxo (preview → tabela → nome do dataset → refresh interval) já é 100% agnóstico de conector, só a UI/nome do componente é acoplada.
-- `server/package.json` — `pg ^8.13.0` já instalado (usado hoje só para o Postgres **interno** da própria app, via `server/src/db.ts`). Nenhuma dependência nova precisa ser instalada.
+**Nav e rotas:**
+- `src/layout/AppShell.tsx:29-34` — array de nav rail: `Data` (`/data`), `Conexões` (`/connections`), `Planilhas` (`/sheets`), `Dashboards`. Renderizado como rail de ícones em `AppShell.tsx:92-118`.
+- `src/App.tsx:24-34` — tabela de rotas: `/data` → `DataPage`, `/connections` → `ConnectionsPage`, `/sheets` → `SheetsPage`, `/dashboards`(+`:id`), `/view/:slug`.
+- `src/components/CommandPalette.tsx:34-38,67,113-118` — busca Cmd/Ctrl+K cruza dashboards/datasets/connections; resultado de connection navega pra `/connections?select=id`, dataset pra `/data?select=id`.
 
-**Templates/galeria — o que existe:**
-- `src/pages/DashboardsPage.tsx:154-178` — dialog "Novo Dashboard" pede só um nome (`TextField`, linha 157-165); `handleCreate` (linha 52-63) chama `createAndSaveDashboard(newName.trim())` e navega pro editor. Não há escolha de ponto de partida.
-- `src/lib/dashboardsStorage.ts:36-50` — `createEmptyDashboard(name)` gera um `DashboardFull` com `dashboard_id: Date.now()`, uma página vazia (`charts: []`), sem dataset embutido. `createAndSaveDashboard(name)` (linha 52-56) chama isso e persiste via `dashboardsApi.create`.
-- `/home/fernandes/jspreadsheet/dashjs/src/core/domain.ts:328-343` — `DashboardFull` exige só `pages: DashboardPageRecord[]` (herdado de `DashboardRecord`, que exige `dashboard_id`/`dashboard_name`); `dataset?: DashboardDataset` é opcional e pode vir com `rows` embutidas (linha 339) — é o mecanismo que o modo CSV/import já usa (`this.csvData` em `DashboardEditor.ts`), então um template com dataset embutido funciona exatamente como um dashboard que importou um CSV.
-- Não existe nenhum dataset de demonstração no repo hoje (confirmado por busca — zero arquivos de seed/sample/demo em `src/` ou `server/`).
-- `server/db/init.sql` / `server/src/routes/dashboards.ts:22-32` (`POST /`) — `definition jsonb` já aceita qualquer `DashboardFull`, incluindo um clonado de um template. Nenhuma mudança de schema necessária.
+**Data Sets ("Data"):**
+- `src/pages/DataPage.tsx` — list+detail (211-247, 250-345). Upload de arquivo (`handleFileChange` 80-99, via `parseFile`), botão "Importar via SQL" abrindo `ImportSqlDialog` (142-147, 158), delete (101-105), refresh manual/agendado (107-125, 301-317), botão "Abrir em Planilhas" (322-334) que faz `setActiveDataset` + navega pra `/sheets`.
+- `src/stores/datasetsStore.tsx` — contexto com `datasets`, `activeDataset`, `createDataset`/`updateDataset`/`removeDataset`/`setActiveDataset`.
+- `src/components/ImportSqlDialog.tsx` — escolhe conexão existente (linha 56, filtra `bigquery`/`postgres`), "Pré-visualizar" via `connectionsApi.preview` (72-85), "Importar" via `connectionsApi.ingest` (87-100), empty-state linkando pra `/connections` (108-116). **Não permite criar conexão nova sem sair do dialog** — esse é o ponto exato da confusão relatada.
+- `src/lib/api.ts:1-38,109-142` — tipos `Dataset`/`DatasetMeta`/`DatasetWorksheet` e `datasetsApi`.
 
-**Brand kit — o que existe:**
-- Dois sistemas de cor **completamente independentes** hoje:
-  1. Chrome do editor: 9 CSS custom properties (`--dashjs-bg`, `--dashjs-accent` etc.) definidas em `/home/fernandes/jspreadsheet/dashjs/src/styles/dashjs.css:6-41`, binário light/dark via atributo `data-dashjs-theme`. **Fora do escopo desta feature** (não mexer).
-  2. Cores de série: `ChartConfig.colors?: { palette: string[] }` (`domain.ts:210`, aprox.) — já existe **por gráfico individual**, editado via swatches em `DashboardEditor.ts:3925-3937` (`data-style="palette"` inputs, escreve em `cfg.colors.palette[idx]`). Consumido por `paletteFor(config)` em `/home/fernandes/jspreadsheet/dashjs/src/core/charts/palette.ts:15-18`: retorna `config.colors.palette` se não vazio, senão `DEFAULT_PALETTE` (array fixo de 8 hex, linha 4-13).
-- `paletteFor` é chamado ~15x em `renderChart.ts`, sempre com `chart.dashboard_chart_config` — não há nenhum ponto hoje onde a cor "cai" pro nível do dashboard inteiro; cada gráfico sem paleta própria usa sempre o mesmo `DEFAULT_PALETTE` global do pacote.
-- `menuModel.ts:179-186` (menu "Resource") já tem um padrão pronto pra pendurar essa feature: `manageBlends`, `manageFilters`, `calcFields` e `theme` (esse último é só o toggle light/dark, apesar do nome "Theme and layout" — não confundir com brand kit) — todos abrem modais/popovers via `MenuActions` injetadas em `DashboardEditor.ts:706-755`.
+**Conexões:**
+- `src/pages/ConnectionsPage.tsx` — CRUD completo: list+detail (244-378), dialog "Nova conexão" (381-496) com seletor de tipo (384-394), campos BigQuery (402-431) e Postgres (432-484), "Testar conexão" (178-192, via `connectionsApi.test`), delete (194-198, 366-373, **sem nenhum guard hoje** — apaga direto).
+- `src/lib/api.ts:70-107` — `ConnectionMeta` e `connectionsApi` (list/create/remove/test/preview/ingest).
+
+**Planilhas:**
+- `src/pages/SheetsPage.tsx` — sidebar própria de datasets (88-150) + área de grid via `JssMount` (222-240); hoje é destino de nav **independente**, não amarrado a um dataset específico até o usuário escolher na sidebar interna ou chegar via `setActiveDataset` (como o botão "Abrir em Planilhas" do DataPage já faz).
+- `src/components/JssMount.tsx` — encapsula Jspreadsheet: monta worksheets (`toJssWorksheet` 45-61), extrai edição (`extractWorksheets` 65-75), modo simples (96-119) vs modo pro/multi-aba (120-150).
+- Não existe entidade "spreadsheet" separada: o estado do grid vive em `datasets.meta.worksheets` (modo pro) ou `datasets.columns`/`data` (modo simples) — é a mesma linha da tabela `datasets`.
+
+**Backend:**
+- `server/src/index.ts:15-18` — monta `/api/datasets`, `/api/dashboards`, `/api/connections`, `/api/public`.
+- `server/src/routes/connections.ts`: `GET /` (21-26), `POST /` (29-81, valida/monta credenciais por `type`), `DELETE /:id` (84-87, sem guard), `POST /:id/test` (90-98, exige conexão já salva), `POST /:id/preview` (101-111, idem), `POST /:id/ingest` (114-131).
+- `server/src/routes/datasets.ts`: `GET /`/`GET /:id`/`POST /`/`PUT /:id`/`DELETE /:id` (8-65), `refresh-schedule`/`refresh-now` (68-91), `insertDataset` (113-137), `refreshDataset` (143-172).
+- `server/src/queryEngine.ts` — dispatcher por `connections.type`, delega pra `bigquery.runQuery`/`postgres.runQuery`.
+- `server/src/bigquery.ts` / `server/src/postgres.ts` — cada um tem `clientFor(connectionId)` que busca a linha em `connections`, decripta credenciais (`crypto.ts`), monta o client, e `runQuery(connectionId, sql, maxRows)`. **Sempre exigem uma connection já persistida** — não existe hoje um caminho de "testar/rodar SQL sem salvar antes".
+- `server/db/init.sql`: `datasets` (3-21), `dashboards` (23-34, `dataset_id` FK `ON DELETE SET NULL`), `connections` (36-44), `datasets.connection_id` FK **`ON DELETE SET NULL`** (49-54) — hoje apagar uma conexão órfã silenciosamente os datasets que dependem dela; refresh agendado desses datasets passa a falhar sem aviso nenhum na hora do delete (só aparece depois em `last_refresh_error`).
+
+**Decisões tomadas (confirmadas com o usuário antes deste plano):**
+1. Arquétipo de layout: **merge total** (estilo Looker Studio) — um item de nav "Dados" substitui Conexões+Data; Conexões vira tela secundária "Gerenciar conexões"; Planilha vira aba dentro do dataset.
+2. Timing de persistência no wizard: conexão só é gravada no banco **no save final** (passo 4), não ao testar (passo 2) — evita conexão órfã se o usuário cancelar no meio. Exige endpoints novos de teste/preview "adhoc" (sem `connectionId`).
+3. Nav de Planilhas: **remove** da nav rail; vira só aba dentro do dataset aberto em Dados (reusa a rota/mecanismo `/sheets` existente por trás da aba, não precisa embutir o grid inline).
+4. Exclusão de conexão em uso: **avisa com contagem** de datasets afetados antes de apagar, exige confirmação explícita (parâmetro `force`).
 
 ## Estado Final Desejado
 
-Um usuário pode: (1) cadastrar uma conexão Postgres do mesmo jeito que cadastra BigQuery hoje (formulário muda os campos conforme o tipo escolhido), rodar preview/ingest de SQL arbitrário e ter refresh agendado funcionando igual; (2) ao criar um dashboard, escolher entre "Em branco" ou um dos templates prontos (com dado de exemplo já carregado, gráficos já montados); (3) abrir "Chart color palette" no menu Resource de qualquer dashboard, definir uma lista de cores, e ver todo gráfico daquele dashboard que não tenha uma paleta própria (setada manualmente na aba Style) usar essas cores.
+Um usuário abre "Dados" (único item de nav pra tudo isso), clica "+ Nova fonte de dados", escolhe BigQuery/Postgres/Upload, informa credenciais (novas ou reaproveitando uma conexão salva) e testa sem nada ser persistido ainda, escreve/confere o SQL com preview, e só ao clicar Salvar a conexão (se nova) e o dataset são gravados. O dataset aberto mostra uma aba "Overview" (metadados, "criado de: Conexão X" linkando pra gerenciamento) e uma aba "Planilha" (abre o grid). Conexões não aparece mais na nav principal; existe uma tela "Gerenciar conexões" só de leitura/exclusão, acessível por link, cujo delete avisa quantos datasets quebram antes de confirmar.
 
 Verificação: ver "Critérios de Sucesso" em cada fase abaixo.
 
 ## Fases de Implementação
 
+As fases têm dependência sequencial (ao contrário da rodada anterior): a Fase 2 (wizard) precisa dos endpoints da Fase 1; a Fase 3 (nav) precisa do wizard da Fase 2 pronto pra virar o botão principal do Data; a Fase 5 (limpeza) só deve rodar depois de Fases 3/4 verificadas manualmente.
+
 ---
 
-### Fase 1: Conector Postgres
+### Fase 1: Backend — teste/preview sem persistir + guard de exclusão
 
-**Objetivo**: segundo conector de dados SQL, ao lado do BigQuery, reaproveitando o máximo de infraestrutura já existente (schema `connections`, criptografia, UI de preview/ingest, refresh agendado).
+**Objetivo**: viabilizar "testar e prever SQL antes de salvar a conexão" e impedir exclusão silenciosa de conexão em uso.
 
 **Mudanças:**
 
-1. `server/src/postgres.ts` (novo arquivo) — client Postgres simétrico a `bigquery.ts`:
+1. `server/src/bigquery.ts` — hoje `clientFor(connectionId)` (linhas 5-14) busca+decripta e retorna `{ bq, location }`, onde `location` vem de `config.location` (não das credenciais) e é usado em `createQueryJob({query, location})` (linha 28). Separar isso preservando o `location` no caminho adhoc, já que sem ele uma query num projeto BigQuery multi-region se comporta diferente no teste/preview (sem location) do que no ingest real pós-save (com location):
    ```ts
-   import pg from 'pg'
-   import { pool } from './db.js'
-   import { decrypt } from './crypto.js'
+   type ServiceAccountCredentials = Record<string, string>
 
-   interface PostgresCredentials {
-     host: string; port: number; user: string; password: string; database: string; ssl?: boolean
+   function clientForCredentials(creds: ServiceAccountCredentials, location?: string) {
+     return { bq: new BigQuery({ projectId: creds.project_id, credentials: creds }), location }
    }
 
-   async function clientFor(connectionId: string): Promise<pg.Client> {
+   async function clientFor(connectionId: string) {
      const { rows } = await pool.query('SELECT * FROM connections WHERE id=$1', [connectionId])
      if (!rows.length) throw new Error('connection not found')
-     const creds = JSON.parse(decrypt(rows[0].credentials)) as PostgresCredentials
-     return new pg.Client({
-       host: creds.host, port: creds.port, user: creds.user, password: creds.password,
-       database: creds.database, ssl: creds.ssl ? { rejectUnauthorized: false } : undefined,
-     })
+     const creds = JSON.parse(decrypt(rows[0].credentials)) as ServiceAccountCredentials
+     const location = (rows[0].config as Record<string, string>)?.location
+     return clientForCredentials(creds, location)
    }
 
-   function coerce(value: unknown): string | number {
-     if (value === null || value === undefined) return ''
-     if (typeof value === 'number') return value
-     if (value instanceof Date) return value.toISOString()
-     return String(value)
+   export async function runQueryWithCredentials(creds: ServiceAccountCredentials, location: string | undefined, sql: string, maxRows = 50_000) {
+     const { bq } = clientForCredentials(creds, location)
+     // mesmo corpo de runQuery hoje (createQueryJob + getQueryResults), usando `location` daqui
    }
 
    export async function runQuery(connectionId: string, sql: string, maxRows = 50_000) {
-     const client = await clientFor(connectionId)
-     await client.connect()
-     try {
-       // Postgres não tem um "maxResults" de client como o BigQuery — envolve a
-       // query do usuário numa subquery com LIMIT pra garantir o mesmo teto,
-       // mesmo que o SQL original não tenha (ou tenha) um LIMIT próprio.
-       const capped = `SELECT * FROM (${sql.replace(/;\s*$/, '')}) AS dashjs_subquery LIMIT $1`
-       const result = await client.query(capped, [maxRows])
-       const columns = result.fields.map((f) => ({ title: f.name }))
-       const data = result.rows.map((row) => columns.map((c) => coerce(row[c.title])))
-       return { columns, data }
-     } finally {
-       await client.end()
-     }
+     const { bq, location } = await clientFor(connectionId)
+     return runQueryWithCredentials(/* extrair creds já decriptadas de clientFor, ou refatorar clientFor pra devolver creds+location e montar bq só dentro de runQueryWithCredentials */ creds, location, sql, maxRows)
    }
    ```
 
-2. `server/src/queryEngine.ts` (novo arquivo) — dispatcher por `type`, único ponto que os callers (`connections.ts`, `datasets.ts`) devem importar daqui pra frente em vez de `bigquery.ts` direto:
+2. `server/src/postgres.ts` — mesma separação: `clientForCredentials(creds: PostgresCredentials)` + `runQueryWithCredentials(creds, sql, maxRows)` (Postgres não tem conceito de `location`, então não precisa desse parâmetro extra), com `runQuery(connectionId, ...)` virando um wrapper fino que busca+decripta e chama `runQueryWithCredentials`.
+
+3. `server/src/queryEngine.ts` — novo export `runQueryAdhoc`, com `location` como parâmetro opcional (só relevante pra `bigquery`; `postgres` ignora):
    ```ts
-   import { pool } from './db.js'
-   import * as bigquery from './bigquery.js'
-   import * as postgres from './postgres.js'
-
-   export async function runQuery(connectionId: string, sql: string, maxRows = 50_000) {
-     const { rows } = await pool.query('SELECT type FROM connections WHERE id = $1', [connectionId])
-     if (!rows.length) throw new Error('connection not found')
-     switch (rows[0].type) {
-       case 'bigquery': return bigquery.runQuery(connectionId, sql, maxRows)
-       case 'postgres': return postgres.runQuery(connectionId, sql, maxRows)
-       default: throw new Error(`unsupported connection type: ${rows[0].type}`)
+   export async function runQueryAdhoc(type: string, credentials: unknown, sql: string, maxRows = 50, location?: string) {
+     switch (type) {
+       case 'bigquery': return bigquery.runQueryWithCredentials(credentials as ServiceAccountCredentials, location, sql, maxRows)
+       case 'postgres': return postgres.runQueryWithCredentials(credentials as PostgresCredentials, sql, maxRows)
+       default: throw new Error(`unsupported connection type: ${type}`)
      }
    }
    ```
 
-3. `server/src/routes/connections.ts`:
-   - Trocar o import `import { runQuery } from '../bigquery.js'` por `import { runQuery } from '../queryEngine.js'`.
-   - `POST /` (hoje linhas 29-66) — branch de validação/montagem de `config`/`credentials` por `type`:
-     ```ts
-     let config: Record<string, unknown>
-     let credsToEncrypt: string
+4. `server/src/routes/connections.ts` — extrair a validação de shape de credenciais por `type` (hoje só dentro de `POST /`, linhas 39-66) pra uma função reusada pelos 3 endpoints que lidam com credencial crua (`POST /`, `test-adhoc`, `preview-adhoc`), pra não duplicar/divergir a regra "BigQuery exige project_id/client_email/private_key" / "Postgres exige host/user/database" em 3 lugares:
+   ```ts
+   function parseCredentials(type: string, credentials: unknown): Record<string, unknown> {
      if (type === 'bigquery') {
-       // ...lógica atual de service-account (project_id/client_email/private_key), inalterada
-     } else if (type === 'postgres') {
-       const { host, port, user, password, database, ssl } = credentials as Record<string, unknown>
-       if (!host || !user || !database) {
-         return res.status(400).json({ error: 'credentials must contain host, user, database' })
+       const sa = typeof credentials === 'string' ? JSON.parse(credentials) : credentials as Record<string, unknown>
+       if (!sa.project_id || !sa.client_email || !sa.private_key) {
+         throw new Error('credentials must contain project_id, client_email, private_key')
        }
-       config = { host, port: port ?? 5432, database, ssl: !!ssl }
-       credsToEncrypt = JSON.stringify({ host, port: port ?? 5432, user, password, database, ssl: !!ssl })
-     } else {
-       return res.status(400).json({ error: `unsupported connection type: ${type}` })
+       return sa
      }
-     ```
-     Nota: pra Postgres, `credentials` chega do frontend como objeto (não string JSON colada como no BigQuery) — o form muda de "cole o JSON" pra campos separados (host/port/user/senha/database/ssl).
-   - `POST /:id/ingest` (hoje linha 99-114) — buscar o `type` real da conexão antes de chamar `insertDataset`, em vez do literal `'bigquery'`:
-     ```ts
-     const { rows: connRows } = await pool.query('SELECT type FROM connections WHERE id=$1', [req.params.id])
-     const connType = connRows[0]?.type ?? 'unknown'
-     const dataset = await insertDataset(name, connType, columns, data, { connectionId: req.params.id, sourceSql: sql, refreshIntervalMinutes: refreshIntervalMinutes ?? null })
-     ```
+     if (type === 'postgres') {
+       const { host, user, database } = credentials as Record<string, unknown>
+       if (!host || !user || !database) throw new Error('credentials must contain host, user, database')
+       return credentials as Record<string, unknown>
+     }
+     throw new Error(`unsupported connection type: ${type}`)
+   }
+   ```
+   `POST /` (linhas 39-66) passa a chamar `parseCredentials` antes de montar `config`/`credsToEncrypt`, em vez de repetir a validação inline.
 
-4. `server/src/routes/datasets.ts` — trocar `import { runQuery } from '../bigquery.js'` por `import { runQuery } from '../queryEngine.js'` em `refreshDataset()`, pra que o refresh agendado funcione também pra datasets vindos de Postgres (a função já é agnóstica de tipo — só lê `connection_id`/`source_sql` da tabela `datasets`).
+5. Dois endpoints novos, antes das rotas existentes, ambos usando `parseCredentials` pra validar antes de rodar:
+   ```ts
+   router.post('/test-adhoc', async (req, res) => {
+     const { type, credentials, location } = req.body
+     try {
+       const parsed = parseCredentials(type, credentials)
+       await runQueryAdhoc(type, parsed, 'SELECT 1', 1, location)
+       res.json({ ok: true })
+     } catch (err) {
+       res.status(400).json({ ok: false, error: (err as Error).message })
+     }
+   })
 
-5. `src/lib/api.ts`:
-   - `ConnectionMeta.config` vira `Record<string, unknown>` (deixa de ser tipado só pra campos BigQuery — cada tela lê os campos que espera pro seu `type`).
-   - `connectionsApi.create(d: { name: string; type: 'bigquery' | 'postgres'; credentials: string | Record<string, unknown>; location?: string })`.
+   router.post('/preview-adhoc', async (req, res) => {
+     const { type, credentials, sql, location } = req.body
+     try {
+       const parsed = parseCredentials(type, credentials)
+       res.json(await runQueryAdhoc(type, parsed, sql, 50, location))
+     } catch (err) {
+       res.status(400).json({ error: (err as Error).message })
+     }
+   })
+   ```
 
-6. `src/pages/ConnectionsPage.tsx`:
-   - Novo `Select` de tipo (`bigquery` / `postgres`) no dialog de criação, antes dos campos de credencial.
-   - Quando `type === 'postgres'`: troca a `TextField` multiline de "Service Account JSON" por campos `host`, `port`, `user`, `password` (type="password"), `database`, checkbox `ssl`.
-   - Painel de detalhe: mostra `config.projectId`/`config.clientEmail` só se `selected.type === 'bigquery'`; mostra `config.host`/`config.database` se `selected.type === 'postgres'`.
+6. `server/src/routes/connections.ts` — `DELETE /:id` (hoje linhas 84-87) ganha guard:
+   ```ts
+   router.delete('/:id', async (req, res) => {
+     const force = req.query.force === 'true'
+     const { rows } = await pool.query(
+       'SELECT count(*)::int AS count FROM datasets WHERE connection_id = $1',
+       [req.params.id],
+     )
+     if (rows[0].count > 0 && !force) {
+       return res.status(409).json({ datasetsAffected: rows[0].count })
+     }
+     await pool.query('DELETE FROM connections WHERE id = $1', [req.params.id])
+     res.status(204).end()
+   })
+   ```
 
-7. `src/components/ImportBigQueryDialog.tsx` → renomear para `ImportSqlDialog.tsx`:
-   - Linha 56: trocar `connections.filter((c) => c.type === 'bigquery')` por `connections.filter((c) => c.type === 'bigquery' || c.type === 'postgres')`.
-   - Título do dialog e textos de estado vazio deixam de mencionar só "BigQuery" (ex: "Importar via SQL", "Nenhuma conexão SQL cadastrada").
-   - `src/pages/DataPage.tsx` — atualizar o import e o label do botão ("Importar do BigQuery" → "Importar via SQL").
+7. `src/lib/api.ts` — novas funções em `connectionsApi`, seguindo o mesmo padrão posicional/fetch já usado pelas outras (ex.: `preview(id, sql)` linha 94, `ingest(id, sql, name, refreshIntervalMinutes?)` linha 101 — não é forma de objeto único):
+   ```ts
+   testAdhoc: (type: 'bigquery' | 'postgres', credentials: string | Record<string, unknown>, location?: string) =>
+     fetch('/api/connections/test-adhoc', {
+       method: 'POST',
+       headers: { 'content-type': 'application/json' },
+       body: JSON.stringify({ type, credentials, location }),
+     }).then(json<{ ok: boolean; error?: string }>),
+
+   previewAdhoc: (type: 'bigquery' | 'postgres', credentials: string | Record<string, unknown>, sql: string, location?: string) =>
+     fetch('/api/connections/preview-adhoc', {
+       method: 'POST',
+       headers: { 'content-type': 'application/json' },
+       body: JSON.stringify({ type, credentials, sql, location }),
+     }).then(json<{ columns: { title: string }[]; data: (string | number)[][] }>),
+   ```
+   `remove(id: string, opts?: { force?: boolean })` passa a montar `?force=true` na URL quando `opts?.force`, e o caller precisa tratar um retorno 409 (ver Fase 4) em vez de assumir sempre sucesso.
 
 **Critérios de Sucesso:**
 
 Automatizados:
 - [x] `tsc --noEmit` no server sem erros
-- [x] `tsc --noEmit` e `npm run build` no React app sem erros
+- [ ] Teste unitário de `runQueryAdhoc`: dispatch correto por `type`, erro em `type` desconhecido — pulado: repo não tem framework de teste configurado (nem server nem front têm vitest/jest); avisar se quiser que eu monte isso
 
 Manuais:
-- [x] Cadastrar uma conexão Postgres real (host/porta/user/senha/database de um banco de teste) → "Testar conexão" retorna sucesso
-- [x] Preview de uma query SQL nessa conexão retorna linhas/colunas certas
-- [x] Ingest cria um dataset com `sourceType: 'postgres'` (não `'bigquery'`)
-- [x] `POST /:id/refresh-now` funciona pra um dataset originado de Postgres (não só BigQuery)
-- [x] Conexão BigQuery existente continua funcionando sem regressão (test/preview/ingest/refresh)
-
-**Status: Fase 1 completa, 5/5 verificações manuais confirmadas em 2026-07-03.**
-
-**Nota operacional**: o container `api` builda o código no `docker build` (`Dockerfile` faz `COPY . .`), sem hot-reload/volume — qualquer mudança em `server/src/*` só entra em produção local rodando `docker compose up -d --build api`. Banco de teste criado no mesmo container Postgres da app (`jss_dashjs-db-1`): database `connector_test`, tabela `sales` (6 linhas), user/senha `jss`/`jss`, host `db` (nome do serviço docker, não `localhost`, pois `api` e `db` estão na mesma rede docker-compose).
+- [ ] `POST /api/connections/test-adhoc` com credenciais válidas de Postgres retorna `{ok:true}` sem criar linha em `connections`
+- [ ] `POST /api/connections/preview-adhoc` com SQL válido retorna colunas/linhas sem criar linha em `datasets` nem `connections`
+- [ ] `DELETE /api/connections/:id` numa conexão usada por 2 datasets retorna 409 com `{datasetsAffected: 2}`; repetir com `?force=true` apaga de fato
+- [ ] Conexões e datasets já existentes (BigQuery e Postgres) continuam funcionando sem regressão (test/preview/ingest/refresh nos endpoints antigos)
 
 ---
 
-### Fase 2: Templates / Galeria de Dashboard
+### Fase 2: Wizard único "+ Nova fonte de dados"
 
-**Objetivo**: ao criar um dashboard, oferecer pontos de partida prontos (com dado de exemplo) além de "em branco".
+**Objetivo**: um único componente substitui o dialog "Nova conexão" do `ConnectionsPage` e o `ImportSqlDialog`, cobrindo os 3 caminhos (BigQuery, Postgres, Upload) sem o usuário sair da tela.
 
 **Mudanças:**
 
-1. `src/lib/templates/types.ts` (novo arquivo):
-   ```ts
-   import type { DashboardFull } from 'dashjs'
+1. `src/components/AddDataSourceWizard.tsx` (novo arquivo) — modal com 4 passos (MUI `Stepper` ou equivalente já usado no projeto):
+   - **Passo 1 — Tipo**: BigQuery / Postgres / Upload de arquivo. Escolher Upload pula direto pro passo 4 (file picker + preview via `parseFile.ts`, mesmo código hoje em `DataPage.tsx:80-99`).
+   - **Passo 2 — Credenciais**: toggle "usar conexão existente" (select populado por `connectionsApi.list()` filtrado pelo `type` escolhido) vs "nova conexão" (campos idênticos aos hoje em `ConnectionsPage.tsx:402-431` pra BigQuery, incl. `location` opcional, e `432-484` pra Postgres). Botão "Testar": se existente, `connectionsApi.test(id)`; se nova, `connectionsApi.testAdhoc(type, credentials, location)` — nada é persistido neste passo.
+   - **Passo 3 — SQL + preview**: textarea de SQL (reusa a UI de `ImportSqlDialog.tsx`) + botão "Pré-visualizar": se conexão existente, `connectionsApi.preview(id, sql)`; se nova, `connectionsApi.previewAdhoc(type, credentials, sql, location)` — mesmo `location` coletado no passo 2, pra teste/preview e ingest real se comportarem igual em projetos BigQuery multi-region.
+   - **Passo 4 — Salvar**: nome do dataset + intervalo de refresh (reusa campos de `ImportSqlDialog.tsx:87-100`). Ao confirmar:
+     - Upload: `datasetsApi.create(...)` direto (sem tocar em `connections`).
+     - Conexão existente: `connectionsApi.ingest(id, sql, name, refreshIntervalMinutes)` — igual ao fluxo de hoje (assinatura posicional, `src/lib/api.ts:101`).
+     - Conexão nova: `connectionsApi.create({name, type, credentials, location})` → pega o `id` retornado → `connectionsApi.ingest(id, sql, name, refreshIntervalMinutes)`. Se o `ingest` falhar (SQL inválido, timeout etc), o wizard chama `connectionsApi.remove(newConnectionId)` antes de mostrar o erro — sem esse rollback, uma conexão nova sobrevive no banco sem nenhum dataset associado, o que contradiz a decisão de "sem resíduo ao cancelar". Só depois do `ingest` confirmar sucesso é que a conexão nova conta como persistida de verdade.
 
-   export interface DashboardTemplate {
-     id: string
-     name: string
-     description: string
-     /** Gera um DashboardFull fresco (novo dashboard_id) toda vez que é chamado —
-      *  evita duas instâncias do mesmo template compartilharem referência. */
-     build: () => DashboardFull
-   }
-   ```
+2. `src/pages/DataPage.tsx` — troca os botões separados "Upload" / "Importar via SQL" (hoje ao redor de 80-147) por um único botão "+ Nova fonte de dados" que abre `AddDataSourceWizard`.
 
-2. `src/lib/templates/salesTemplate.ts`, `marketingTemplate.ts`, `npsTemplate.ts` (novos arquivos) — 3 templates curados, cada um exportando um `DashboardTemplate` cujo `build()` retorna um `DashboardFull` com:
-   - `dataset: { source: 'import', fileName: 'demo.csv', rows: [...] }` — dado de exemplo embutido (10-30 linhas, mesmo mecanismo que o import de CSV já usa).
-   - 1 página com 2-3 gráficos (ex: bar + line + kpi) já com `dashboard_chart_config.slots.dimension/metric` apontando pros campos do `rows` embutido, então renderizam de verdade assim que o dashboard abre.
-   - Exemplo de estrutura (sales):
-     ```ts
-     export const salesTemplate: DashboardTemplate = {
-       id: 'sales',
-       name: 'Vendas',
-       description: 'Receita por região e por mês, com KPI de total.',
-       build: () => ({
-         dashboard_id: Date.now(),
-         dashboard_name: 'Vendas',
-         pages: [{
-           dashboard_page_id: 1,
-           dashboard_page_name: 'Página 1',
-           charts: [ /* bar (região x receita), line (mês x receita), kpi (total) */ ],
-         }],
-         dataset: {
-           source: 'import',
-           fileName: 'vendas-exemplo.csv',
-           rows: [ /* linhas de exemplo */ ],
-         },
-       }),
-     }
-     ```
-
-3. `src/lib/templates/index.ts` (novo arquivo):
-   ```ts
-   export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [salesTemplate, marketingTemplate, npsTemplate]
-   ```
-
-4. `src/lib/dashboardsStorage.ts` — novo `createAndSaveDashboardFromTemplate`:
-   ```ts
-   export async function createAndSaveDashboardFromTemplate(
-     name: string,
-     template: DashboardTemplate,
-   ): Promise<{ id: string; dashboard: DashboardFull }> {
-     const dashboard = { ...template.build(), dashboard_name: name }
-     const row = await dashboardsApi.create({ name, definition: dashboard })
-     return { id: row.id, dashboard }
-   }
-   ```
-
-5. `src/pages/DashboardsPage.tsx` — reformular o dialog "Novo Dashboard" (hoje linhas 154-178, só um `TextField`) numa galeria:
-   - Grid de cards: primeiro card "Em branco" (ícone `DashboardIcon`, fluxo atual inalterado), depois um card por item de `DASHBOARD_TEMPLATES` (nome + descrição).
-   - Selecionar um card abre (ou mantém) o campo de nome, pré-preenchido com `template.name`, e no confirmar chama `createAndSaveDashboardFromTemplate(name, template)` em vez de `createAndSaveDashboard(name)` quando um template foi escolhido.
+3. `src/components/ImportSqlDialog.tsx` — apagar (lógica absorvida pelo wizard; ver Fase 5).
 
 **Critérios de Sucesso:**
 
@@ -252,75 +217,92 @@ Automatizados:
 - [x] `tsc --noEmit` e `npm run build` no React app sem erros
 
 Manuais:
-- [ ] Dashboards → Novo Dashboard → galeria mostra "Em branco" + 3 templates
-- [ ] Escolher um template → editor abre com gráficos já populados com dado de exemplo (sem precisar escolher fonte de dados)
-- [ ] Dashboard criado a partir de template é editável e salvável normalmente (trocar dataset, adicionar gráfico, etc — não é somente-leitura)
-- [ ] Fluxo "Em branco" continua idêntico ao de hoje (sem regressão)
+- [ ] Fluxo completo "BigQuery novo" ponta a ponta: tipo → credenciais novas → testar (sem nada salvo ainda, conferir no `GET /api/connections`) → SQL → preview → salvar → dataset aparece em Dados, conexão aparece em Gerenciar conexões
+- [ ] Fluxo "Postgres reaproveitando conexão existente": passo 2 lista conexões já salvas, pula direto pro preview sem pedir credencial de novo
+- [ ] Fluxo "Upload de CSV": pula passos 2/3, vai direto pro preview do arquivo
+- [ ] Cancelar o wizard depois de testar uma conexão nova (antes do passo 4) não deixa linha órfã em `connections`
+- [ ] Conexão nova + SQL inválido no passo 4 (ingest falha): confirmar que a conexão criada no início do passo 4 é removida (`GET /api/connections` não mostra ela depois do erro)
+- [ ] Conexão BigQuery nova com `location` preenchido: preview no passo 3 e o dataset ingerido no passo 4 rodam contra a mesma region (não há diferença de comportamento entre pré-save e pós-save)
 
 ---
 
-### Fase 3: Brand Kit (paleta de séries por dashboard)
+### Fase 3: Nav e rotas
 
-**Objetivo**: uma paleta de cores salva no nível do dashboard, usada como default por todo gráfico que não tenha uma paleta própria.
+**Objetivo**: nav rail reflete o merge; Planilha some como destino global.
 
 **Mudanças:**
 
-1. `/home/fernandes/jspreadsheet/dashjs/src/core/domain.ts` — novo campo em `DashboardFull` (perto da linha 343, ao lado de `dataset`/`filters`):
-   ```ts
-   /** Brand kit — paleta de cores default para todo gráfico do dashboard que
-    *  não tiver uma paleta própria (ChartConfig.colors.palette). Editado via
-    *  menu Resource ▸ Chart color palette. */
-   colors?: { palette: string[] }
-   ```
+1. `src/layout/AppShell.tsx:29-34` — array de nav rail passa a ter só `Dados` (`/data`) e `Dashboards`; remove as entradas `Conexões` e `Planilhas`.
 
-2. `/home/fernandes/jspreadsheet/dashjs/src/core/pages/menuModel.ts`:
-   - `MenuActions` (perto da linha 88, ao lado de `theme()`): adicionar `editBrandPalette(): void`.
-   - Menu `resource` (linha 179-186): novo item antes de `params`:
-     ```ts
-     { id: 'brandkit', label: 'Chart color palette', icon: 'palette', action: a.editBrandPalette },
-     ```
+2. `src/App.tsx:24-34` — rotas `/connections` e `/sheets` continuam existindo (nenhum código que dependa delas quebra), só deixam de estar na nav principal — viram acessíveis só por link.
 
-3. `/home/fernandes/jspreadsheet/dashjs/src/core/pages/DashboardEditor.ts`:
-   - Linha ~741 (junto de `calcFields: () => this.openCalcFieldEditor()`): adicionar `editBrandPalette: () => this.openBrandPaletteEditor(),`.
-   - Novo método `openBrandPaletteEditor()` — modal via `openNativeModal` (mesmo padrão de `openCalcFieldEditor`/`openBlendBuilder`): lista de swatches (`<input type="color">` + hex), botões adicionar/remover cor, inicializado com `this.dashboard.colors?.palette ?? [...DEFAULT_PALETTE]`. Ao salvar: `this.dashboard.colors = { palette: [...cores] }`, `this.markDirty()`, `this.rerenderAllCharts()`.
-   - Novo método privado, usado só internamente antes de cada `renderChart(...)`:
-     ```ts
-     /** Se o chart não tem paleta própria mas o dashboard tem um brand kit,
-      *  injeta a paleta do dashboard na view antes de renderizar — sem
-      *  mutar o chart real (this.dashboard.pages[...].charts[...]), então
-      *  o fallback continua dinâmico se o brand kit mudar depois. */
-     private applyBrandPalette(view: DashboardChartRecord): DashboardChartRecord {
-       const hasOwnPalette = (view.dashboard_chart_config?.colors?.palette?.length ?? 0) > 0
-       const brandPalette = this.dashboard.colors?.palette
-       if (hasOwnPalette || !brandPalette?.length) return view
-       return {
-         ...view,
-         dashboard_chart_config: { ...(view.dashboard_chart_config ?? {}), colors: { palette: brandPalette } },
-       }
-     }
-     ```
-   - Nos 4 pontos de `mountChart()` que chamam `renderChart(body/liveBody, view, this.renderOptionsFor(chart))` (mesmos 4 tocados na Fase 3 da rodada anterior, cross-filter), envolver `view` com `this.applyBrandPalette(view)` antes de passar pro `renderChart`.
-   - Nenhuma mudança em `renderChart.ts` ou `palette.ts` — `paletteFor` já lê `config.colors.palette`, só está recebendo um valor pré-preenchido agora.
+3. `src/pages/DataPage.tsx` — painel de detalhe (hoje 250-345) ganha `Tabs`: **Overview** (conteúdo atual do painel) e **Planilha** (clique navega pra `/sheets` fazendo `setActiveDataset(dataset)` antes — mesmo mecanismo que o botão "Abrir em Planilhas" já faz hoje em 322-334, só reembalado como aba em vez de botão solto).
+
+4. `src/pages/ConnectionsPage.tsx` — vira "Gerenciar conexões": mantém list+detail+delete, mas sem o dialog "Nova conexão" (ver Fase 5) — só acessível a partir de um link dentro de Dados, não mais item de nav.
 
 **Critérios de Sucesso:**
 
 Automatizados:
-- [x] `tsc --noEmit` no core package sem erros
-- [x] Teste unitário de `applyBrandPalette`: retorna a view inalterada quando o chart já tem paleta própria; injeta a paleta do dashboard quando o chart não tem uma e o dashboard tem brand kit; retorna a view inalterada quando nem chart nem dashboard têm paleta (cai no `DEFAULT_PALETTE` de sempre)
+- [x] `tsc --noEmit` e `npm run build` sem erros
 
 Manuais:
-- [ ] Menu Resource ▸ "Chart color palette" abre modal, define uma paleta custom, salva
-- [ ] Todo gráfico do dashboard sem cor própria passa a usar as cores novas
-- [ ] Um gráfico com paleta própria (setada na aba Style, swatches individuais) mantém sua cor, ignora o brand kit
-- [ ] Brand kit é persistido (salvar dashboard, recarregar página, paleta continua aplicada)
+- [ ] Nav rail mostra só Dados/Dashboards
+- [ ] Dentro de um dataset, aba "Planilha" abre o grid daquele dataset especificamente (não de outro)
+- [ ] `/connections` e `/sheets` continuam acessíveis via URL direta e via `CommandPalette`, mesmo fora da nav rail
+
+---
+
+### Fase 4: Religação e transparência
+
+**Objetivo**: fechar o vínculo visual entre dataset e conexão de origem, e usar o guard de exclusão da Fase 1 na UI.
+
+**Mudanças:**
+
+1. `src/pages/DataPage.tsx` (aba Overview) — se `dataset.connectionId` existir, busca a lista de conexões (`connectionsApi.list()`, já carregada em outros pontos do app) e mostra "Criado de: Conexão {nome}" linkando pra `/connections?select={connectionId}`.
+
+2. `src/pages/ConnectionsPage.tsx` — `handleDelete` (hoje 194-198) passa a chamar `connectionsApi.remove(id)` sem `force`; se a resposta for 409, mostra um `Dialog` de confirmação "Esta conexão alimenta N dataset(s); removê-la vai quebrar o refresh deles. Continuar?" e só then re-chama `connectionsApi.remove(id, {force: true})`.
+
+3. `src/components/CommandPalette.tsx` — resultado de tipo "connection" continua navegando pra `/connections?select=id`; ajustar label do grupo se ainda disser algo como "Conexões" lado a lado com "Datasets" de um jeito que sugira paridade de nav (cosmético, conferir `GROUP_LABELS` em 34-38).
+
+**Critérios de Sucesso:**
+
+Automatizados:
+- [x] `tsc --noEmit` e `npm run build` sem erros
+
+Manuais:
+- [ ] Dataset criado via SQL mostra o nome real da conexão de origem, link funciona
+- [ ] Dataset de upload (sem `connectionId`) não mostra essa linha
+- [ ] Excluir conexão usada por datasets mostra o aviso com contagem certa antes de apagar; excluir conexão sem uso não mostra aviso nenhum
+
+---
+
+### Fase 5: Limpeza
+
+**Objetivo**: remover código duplicado agora redundante depois que Fases 2-4 estão verificadas — mas preservando um caminho de pré-provisionar conexão sem exigir dataset junto (o schema já modela `connection 1→N datasets`; um admin cadastrando uma conexão compartilhada pra outra pessoa reusar depois é um uso legítimo que o wizard sozinho não cobre, já que o wizard sempre termina num `ingest`).
+
+**Mudanças:**
+
+1. `src/pages/ConnectionsPage.tsx` — o dialog "Nova conexão" (hoje 381-496) não é removido, mas **encolhe**: perde os campos de SQL/preview/nome-de-dataset (que já não existem nele hoje) e vira só "cadastrar + testar credencial" (`connectionsApi.create` + `connectionsApi.test`), sem gerar dataset nenhum — puramente pra deixar a conexão disponível pro passo 2 do wizard escolher como "conexão existente" depois. Continua fora da nav principal, só dentro de "Gerenciar conexões".
+2. `src/components/ImportSqlDialog.tsx` — apagar o arquivo (substituído por `AddDataSourceWizard.tsx`).
+3. `src/pages/DataPage.tsx` — remove o botão solto "Abrir em Planilhas" (absorvido pela aba Planilha da Fase 3).
+
+**Critérios de Sucesso:**
+
+Automatizados:
+- [x] `tsc --noEmit` e `npm run build` sem erros, sem imports órfãos de `ImportSqlDialog`
+
+Manuais:
+- [ ] "Gerenciar conexões" ainda permite cadastrar+testar uma conexão nova sem criar dataset nenhum (pré-provisionamento)
+- [ ] Conexão pré-provisionada dessa forma aparece no passo 2 do wizard como "conexão existente"
+- [ ] Nenhuma regressão nos fluxos verificados nas Fases 2-4 depois da remoção
 
 ## Notas de Implementação
 
-- Nenhuma migração de banco é necessária em nenhuma das 3 fases: `connections`/`datasets` já têm schema agnóstico de tipo (rodada anterior), e o brand kit vive dentro do `definition jsonb` já existente de `dashboards`.
-- Nenhuma dependência nova é instalada — `pg` já está no `server/package.json` (usado hoje só pro banco interno da app).
-- A ordem das fases é independente — nenhuma depende de outra. Podem ser implementadas e verificadas em qualquer ordem, ou em paralelo.
-- Risco aceito conscientemente na Fase 1: envolver a query do usuário numa subquery (`SELECT * FROM (${sql}) LIMIT $1`) pra Postgres assume que o SQL é uma única instrução `SELECT`/CTE-com-SELECT-no-final — não suporta múltiplas instruções separadas por `;` nem comandos que não sejam leitura (o que é consistente com o uso esperado: preview/ingest read-only, igual ao BigQuery hoje).
+- Nenhuma migração de banco é necessária — `connections`/`datasets`/`dashboards` já têm o schema agnóstico de tipo necessário; a mudança é só de wizard/nav/rota.
+- Uma aba adicional "Preview gráfico" dentro do dataset foi cogitada durante a decisão de layout mas fica fora de escopo deste plano — Overview + Planilha cobrem o pedido original; pode virar um plano futuro separado se fizer falta.
+- `SheetsPage.tsx` mantém sua sidebar interna de troca de dataset (88-150) intacta — deixa de ser alcançável por nav global, mas continua útil pra trocar de dataset sem voltar pra Dados enquanto já se está numa planilha.
+- Fase 1 deve ser implementada e verificada isoladamente antes da Fase 2 (o wizard depende dos endpoints `test-adhoc`/`preview-adhoc`); Fase 5 só deve rodar depois de Fases 2-4 confirmadas manualmente, pra não remover os dialogs antigos antes do substituto estar 100% funcional.
 
 ## Questões em Aberto
 
-Nenhuma — as 4 decisões de produto que exigiam julgamento humano foram resolvidas com as opções recomendadas (ver topo do documento).
+Nenhuma — as 4 decisões de produto que exigiam julgamento humano (arquétipo de layout, timing de persistência da conexão no wizard, destino da aba Planilhas, guard de exclusão) foram resolvidas com as opções recomendadas (ver topo do documento).

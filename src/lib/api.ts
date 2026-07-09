@@ -86,7 +86,8 @@ export const connectionsApi = {
       body: JSON.stringify(d),
     }).then(json<ConnectionMeta>),
 
-  remove: (id: string) => fetch(`/api/connections/${id}`, { method: 'DELETE' }),
+  remove: (id: string, opts?: { force?: boolean }) =>
+    fetch(`/api/connections/${id}${opts?.force ? '?force=true' : ''}`, { method: 'DELETE' }),
 
   test: (id: string) =>
     fetch(`/api/connections/${id}/test`, { method: 'POST' }).then(json<{ ok: boolean; error?: string }>),
@@ -104,6 +105,20 @@ export const connectionsApi = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ sql, name, refreshIntervalMinutes }),
     }).then(json<Dataset>),
+
+  testAdhoc: (type: 'bigquery' | 'postgres', credentials: string | Record<string, unknown>, location?: string) =>
+    fetch('/api/connections/test-adhoc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type, credentials, location }),
+    }).then(json<{ ok: boolean; error?: string }>),
+
+  previewAdhoc: (type: 'bigquery' | 'postgres', credentials: string | Record<string, unknown>, sql: string, location?: string) =>
+    fetch('/api/connections/preview-adhoc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type, credentials, sql, location }),
+    }).then(json<{ columns: { title: string }[]; data: (string | number)[][] }>),
 }
 
 export const datasetsApi = {

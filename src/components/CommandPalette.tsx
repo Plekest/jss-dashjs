@@ -34,7 +34,7 @@ interface Result {
 const GROUP_LABELS: Record<ResultType, string> = {
   dashboard: 'Dashboards',
   dataset: 'Datasets',
-  connection: 'Conexões',
+  connection: 'Gerenciar conexões',
 }
 
 const GROUP_ICONS: Record<ResultType, ReactNode> = {

@@ -193,7 +193,14 @@ export function ConnectionsPage() {
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Remover conexão "${name}"?`)) return
-    await connectionsApi.remove(id)
+    const res = await connectionsApi.remove(id)
+    if (res.status === 409) {
+      const { datasetsAffected } = await res.json()
+      if (!confirm(`Esta conexão alimenta ${datasetsAffected} dataset(s); removê-la vai quebrar o refresh deles. Continuar?`)) {
+        return
+      }
+      await connectionsApi.remove(id, { force: true })
+    }
     await load()
   }
 
@@ -201,7 +208,7 @@ export function ConnectionsPage() {
     <Box sx={{ p: 3, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
-          Conexões
+          Gerenciar conexões
         </Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
           Nova conexão

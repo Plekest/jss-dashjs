@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
 import { encrypt } from '../crypto.js'
-import { runQuery } from '../queryEngine.js'
+import { runQuery, runQueryAdhoc } from '../queryEngine.js'
 import { insertDataset } from './datasets.js'
 
 const router = Router()
@@ -17,6 +17,33 @@ function toCamel(row: Record<string, unknown>) {
   }
 }
 
+/** Validates & normalizes raw credentials by connection type. Shared by
+ *  `POST /` and the adhoc test/preview endpoints so the shape rules
+ *  ("BigQuery needs project_id/client_email/private_key", "Postgres needs
+ *  host/user/database") don't drift between them. */
+function parseCredentials(type: string, credentials: unknown): Record<string, unknown> {
+  if (type === 'bigquery') {
+    let sa: Record<string, unknown>
+    try {
+      sa = typeof credentials === 'string' ? JSON.parse(credentials) : (credentials as Record<string, unknown>)
+    } catch {
+      throw new Error('credentials must be valid JSON')
+    }
+    if (!sa.project_id || !sa.client_email || !sa.private_key) {
+      throw new Error('credentials must contain project_id, client_email, private_key')
+    }
+    return sa
+  }
+  if (type === 'postgres') {
+    const { host, user, database } = (credentials ?? {}) as Record<string, unknown>
+    if (!host || !user || !database) {
+      throw new Error('credentials must contain host, user, database')
+    }
+    return credentials as Record<string, unknown>
+  }
+  throw new Error(`unsupported connection type: ${type}`)
+}
+
 // List connections (no credentials field)
 router.get('/', async (_req, res) => {
   const { rows } = await pool.query(
@@ -27,27 +54,17 @@ router.get('/', async (_req, res) => {
 
 // Create connection
 router.post('/', async (req, res) => {
+  const { name, type, credentials, location } = req.body
+  if (!name || !type || !credentials) {
+    return res.status(400).json({ error: 'name, type, credentials are required' })
+  }
+
+  let config: Record<string, unknown>
+  let credsToEncrypt: string
+
   try {
-    const { name, type, credentials, location } = req.body
-    if (!name || !type || !credentials) {
-      return res.status(400).json({ error: 'name, type, credentials are required' })
-    }
-
-    let config: Record<string, unknown>
-    let credsToEncrypt: string
-
     if (type === 'bigquery') {
-      let saJson: Record<string, unknown>
-      try {
-        saJson = typeof credentials === 'string' ? JSON.parse(credentials) : credentials
-      } catch {
-        return res.status(400).json({ error: 'credentials must be valid JSON' })
-      }
-
-      if (!saJson.project_id || !saJson.client_email || !saJson.private_key) {
-        return res.status(400).json({ error: 'credentials must contain project_id, client_email, private_key' })
-      }
-
+      const saJson = parseCredentials(type, credentials)
       config = {
         projectId: saJson.project_id,
         clientEmail: saJson.client_email,
@@ -55,18 +72,19 @@ router.post('/', async (req, res) => {
       }
       credsToEncrypt = JSON.stringify(saJson)
     } else if (type === 'postgres') {
-      const { host, port, user, password, database, ssl } = credentials as Record<string, unknown>
-      if (!host || !user || !database) {
-        return res.status(400).json({ error: 'credentials must contain host, user, database' })
-      }
+      const parsed = parseCredentials(type, credentials)
+      const { host, port, user, password, database, ssl } = parsed
       config = { host, port: port ?? 5432, database, ssl: !!ssl }
       credsToEncrypt = JSON.stringify({ host, port: port ?? 5432, user, password, database, ssl: !!ssl })
     } else {
       return res.status(400).json({ error: `unsupported connection type: ${type}` })
     }
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message })
+  }
 
+  try {
     const encryptedCreds = encrypt(credsToEncrypt)
-
     const { rows } = await pool.query(
       `INSERT INTO connections (name, type, config, credentials)
        VALUES ($1, $2, $3, $4)
@@ -80,8 +98,44 @@ router.post('/', async (req, res) => {
   }
 })
 
-// Delete connection
+// Test credentials without persisting a connection row.
+router.post('/test-adhoc', async (req, res) => {
+  const { type, credentials, location } = req.body
+  try {
+    const parsed = parseCredentials(type, credentials)
+    await runQueryAdhoc(type, parsed, 'SELECT 1 AS ok', 1, location)
+    res.json({ ok: true })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(400).json({ ok: false, error: msg })
+  }
+})
+
+// Preview a query against not-yet-persisted credentials.
+router.post('/preview-adhoc', async (req, res) => {
+  const { type, credentials, sql, location } = req.body
+  if (!sql) return res.status(400).json({ error: 'sql is required' })
+  try {
+    const parsed = parseCredentials(type, credentials)
+    res.json(await runQueryAdhoc(type, parsed, sql, 50, location))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(400).json({ error: msg })
+  }
+})
+
+// Delete connection. Refuses (409) if datasets still depend on it, unless
+// ?force=true — silently orphaning a dataset's scheduled refresh is the
+// exact bug this guard exists to prevent.
 router.delete('/:id', async (req, res) => {
+  const force = req.query.force === 'true'
+  const { rows } = await pool.query(
+    'SELECT count(*)::int AS count FROM datasets WHERE connection_id = $1',
+    [req.params.id],
+  )
+  if (rows[0].count > 0 && !force) {
+    return res.status(409).json({ datasetsAffected: rows[0].count })
+  }
   await pool.query('DELETE FROM connections WHERE id = $1', [req.params.id])
   res.status(204).end()
 })

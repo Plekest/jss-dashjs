@@ -11,18 +11,10 @@ interface PostgresCredentials {
   ssl?: boolean
 }
 
-async function clientFor(connectionId: string): Promise<pg.Client> {
+async function credentialsFor(connectionId: string): Promise<PostgresCredentials> {
   const { rows } = await pool.query('SELECT * FROM connections WHERE id=$1', [connectionId])
   if (!rows.length) throw new Error('connection not found')
-  const creds = JSON.parse(decrypt(rows[0].credentials)) as PostgresCredentials
-  return new pg.Client({
-    host: creds.host,
-    port: creds.port,
-    user: creds.user,
-    password: creds.password,
-    database: creds.database,
-    ssl: creds.ssl ? { rejectUnauthorized: false } : undefined,
-  })
+  return JSON.parse(decrypt(rows[0].credentials)) as PostgresCredentials
 }
 
 function coerce(value: unknown): string | number {
@@ -32,8 +24,15 @@ function coerce(value: unknown): string | number {
   return String(value)
 }
 
-export async function runQuery(connectionId: string, sql: string, maxRows = 50_000) {
-  const client = await clientFor(connectionId)
+export async function runQueryWithCredentials(creds: PostgresCredentials, sql: string, maxRows = 50_000) {
+  const client = new pg.Client({
+    host: creds.host,
+    port: creds.port,
+    user: creds.user,
+    password: creds.password,
+    database: creds.database,
+    ssl: creds.ssl ? { rejectUnauthorized: false } : undefined,
+  })
   await client.connect()
   try {
     // Postgres has no client-side "maxResults" like BigQuery — wrap the
@@ -47,4 +46,9 @@ export async function runQuery(connectionId: string, sql: string, maxRows = 50_0
   } finally {
     await client.end()
   }
+}
+
+export async function runQuery(connectionId: string, sql: string, maxRows = 50_000) {
+  const creds = await credentialsFor(connectionId)
+  return runQueryWithCredentials(creds, sql, maxRows)
 }

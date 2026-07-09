@@ -13,11 +13,9 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import TableChartIcon from '@mui/icons-material/TableChart'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import AnalyticsIcon from '@mui/icons-material/Analytics'
 import StorageIcon from '@mui/icons-material/Storage'
-import CableIcon from '@mui/icons-material/Cable'
 import Brightness4Icon from '@mui/icons-material/Brightness4'
 import Brightness7Icon from '@mui/icons-material/Brightness7'
 import SearchIcon from '@mui/icons-material/Search'
@@ -27,9 +25,7 @@ import { CommandPalette } from '../components/CommandPalette'
 const RAIL_WIDTH = 64
 
 const navItems = [
-  { label: 'Data', path: '/data', icon: <StorageIcon /> },
-  { label: 'Conexões', path: '/connections', icon: <CableIcon /> },
-  { label: 'Planilhas', path: '/sheets', icon: <TableChartIcon /> },
+  { label: 'Dados', path: '/data', icon: <StorageIcon /> },
   { label: 'Dashboards', path: '/dashboards', icon: <DashboardIcon /> },
 ]
 

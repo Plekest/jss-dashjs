@@ -9,18 +9,17 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Tab,
+  Tabs,
   Typography,
 } from '@mui/material'
-import UploadFileIcon from '@mui/icons-material/UploadFile'
+import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import StorageIcon from '@mui/icons-material/Storage'
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useDatasetsStore } from '../stores/datasetsStore'
-import { parseFile } from '../lib/parseFile'
-import { ImportSqlDialog } from '../components/ImportSqlDialog'
-import { datasetsApi } from '../lib/api'
+import { AddDataSourceWizard } from '../components/AddDataSourceWizard'
+import { connectionsApi, datasetsApi, type ConnectionMeta } from '../lib/api'
 
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -34,14 +33,16 @@ function formatRows(n: number) {
 export function DataPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { datasets, loading, createDataset, removeDataset, refresh, setActiveDataset } = useDatasetsStore()
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [bqDialogOpen, setBqDialogOpen] = useState(false)
+  const { datasets, loading, removeDataset, refresh, setActiveDataset } = useDatasetsStore()
+  const [wizardOpen, setWizardOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [refreshingNow, setRefreshingNow] = useState(false)
   const [savingInterval, setSavingInterval] = useState(false)
+  const [connections, setConnections] = useState<ConnectionMeta[]>([])
+
+  useEffect(() => {
+    connectionsApi.list().then(setConnections)
+  }, [])
   // Tracks a select param mid-flight: setSelectedId and setSearchParams don't
   // land in the same commit (react-router dispatches its own re-render), so
   // the fallback-to-first-item check below must wait for selectedId to
@@ -77,27 +78,6 @@ export function DataPage() {
 
   const selected = datasets.find((d) => d.id === selectedId) ?? null
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setError(null)
-    setUploading(true)
-    try {
-      const parsed = await parseFile(file)
-      await createDataset({
-        name: file.name.replace(/\.[^.]+$/, ''),
-        sourceType: parsed.sourceType,
-        columns: parsed.columns,
-        data: parsed.data,
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao processar arquivo')
-    } finally {
-      setUploading(false)
-      e.target.value = ''
-    }
-  }
-
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Remover dataset "${name}"?`)) return
     await removeDataset(id)
@@ -128,42 +108,14 @@ export function DataPage() {
     <Box sx={{ p: 3, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
         <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 600 }}>
-          Data
+          Dados
         </Typography>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv,.tsv,.json,.xlsx,.xls"
-          style={{ display: 'none' }}
-          onChange={handleFileChange}
-        />
-        <Button
-          variant="outlined"
-          startIcon={<CloudDownloadIcon />}
-          onClick={() => setBqDialogOpen(true)}
-          sx={{ mr: 1 }}
-        >
-          Importar via SQL
-        </Button>
-        <Button
-          variant="contained"
-          startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : <UploadFileIcon />}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-        >
-          {uploading ? 'Enviando…' : 'Enviar arquivo'}
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
+          Nova fonte de dados
         </Button>
       </Box>
 
-      <ImportSqlDialog open={bqDialogOpen} onClose={() => setBqDialogOpen(false)} />
-
-      {error && (
-        <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fce8e6', borderRadius: 1 }}>
-          <Typography variant="body2" color="error">
-            {error}
-          </Typography>
-        </Box>
-      )}
+      <AddDataSourceWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
 
       {loading && !datasets.length ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
@@ -186,14 +138,10 @@ export function DataPage() {
             Nenhuma base de dados ainda
           </Typography>
           <Typography variant="body2" color="text.disabled" textAlign="center" maxWidth={360}>
-            Envie um arquivo CSV, Excel, JSON ou TSV. Ele ficará disponível em Planilhas e Dashboards.
+            Envie um arquivo CSV, Excel, JSON ou TSV, ou conecte um BigQuery/Postgres via SQL.
           </Typography>
-          <Button
-            variant="contained"
-            startIcon={<UploadFileIcon />}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Enviar primeiro arquivo
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setWizardOpen(true)}>
+            Nova fonte de dados
           </Button>
         </Box>
       ) : (
@@ -252,6 +200,22 @@ export function DataPage() {
               <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>
                 {selected.name}
               </Typography>
+
+              <Tabs
+                value={0}
+                onChange={(_, value) => {
+                  if (value !== 1) return
+                  // Sheets doesn't take a dataset via URL — it reads
+                  // activeDataset from the store, so this must run first.
+                  setActiveDataset(selected.id)
+                  navigate('/sheets')
+                }}
+                sx={{ mb: 2, minHeight: 36 }}
+              >
+                <Tab label="Overview" sx={{ minHeight: 36 }} />
+                <Tab label="Planilha" sx={{ minHeight: 36 }} />
+              </Tabs>
+
               <Box
                 sx={{
                   display: 'grid',
@@ -277,6 +241,19 @@ export function DataPage() {
                 </Typography>
                 <Typography variant="body2">{formatDate(selected.updatedAt)}</Typography>
               </Box>
+
+              {selected.connectionId && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Criado de:{' '}
+                  <Box
+                    component="span"
+                    onClick={() => navigate(`/connections?select=${selected.connectionId}`)}
+                    sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                  >
+                    Conexão {connections.find((c) => c.id === selected.connectionId)?.name ?? selected.connectionId}
+                  </Box>
+                </Typography>
+              )}
 
               {selected.connectionId && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 3, maxWidth: 480 }}>
@@ -319,19 +296,6 @@ export function DataPage() {
               )}
 
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<OpenInNewIcon />}
-                  onClick={() => {
-                    // SheetsPage reads the dataset to show from the store's
-                    // activeDataset, not the URL — without this it lands on
-                    // /sheets with whatever was active before (or nothing).
-                    setActiveDataset(selected.id)
-                    navigate('/sheets')
-                  }}
-                >
-                  Abrir em Planilhas
-                </Button>
                 <Button
                   variant="outlined"
                   color="error"

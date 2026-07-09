@@ -11,3 +11,24 @@ export async function runQuery(connectionId: string, sql: string, maxRows = 50_0
     default: throw new Error(`unsupported connection type: ${rows[0].type}`)
   }
 }
+
+export async function runQueryAdhoc(
+  type: string,
+  credentials: unknown,
+  sql: string,
+  maxRows = 50,
+  location?: string,
+) {
+  switch (type) {
+    case 'bigquery':
+      return bigquery.runQueryWithCredentials(credentials as Record<string, string>, location, sql, maxRows)
+    case 'postgres':
+      return postgres.runQueryWithCredentials(
+        credentials as { host: string; port: number; user: string; password: string; database: string; ssl?: boolean },
+        sql,
+        maxRows,
+      )
+    default:
+      throw new Error(`unsupported connection type: ${type}`)
+  }
+}
