@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { pool } from '../db.js'
 import { requireAuth, requireRole, type AuthedRequest } from '../auth.js'
 import { nextRunFromCron } from '../cron.js'
+import { isValidEmail } from '../validate.js'
 
 const router = Router()
 
@@ -36,6 +37,9 @@ router.post('/', requireRole('owner', 'editor'), async (req, res) => {
   if (!dashboardId || !name || !Array.isArray(metrics) || !metrics.length || !Array.isArray(recipients) || !recipients.length || !cron) {
     return res.status(400).json({ error: 'dashboardId, name, metrics, recipients, cron are required' })
   }
+  if (!recipients.every(isValidEmail)) {
+    return res.status(400).json({ error: 'recipients must all be valid email addresses' })
+  }
   let nextRunAt: Date
   try {
     nextRunAt = nextRunFromCron(cron)
@@ -60,7 +64,12 @@ router.put('/:id', requireRole('owner', 'editor'), async (req, res) => {
 
   if (name !== undefined) { updates.push(`name = $${i++}`); values.push(name) }
   if (metrics !== undefined) { updates.push(`metrics = $${i++}`); values.push(JSON.stringify(metrics)) }
-  if (recipients !== undefined) { updates.push(`recipients = $${i++}`); values.push(recipients) }
+  if (recipients !== undefined) {
+    if (!Array.isArray(recipients) || !recipients.every(isValidEmail)) {
+      return res.status(400).json({ error: 'recipients must all be valid email addresses' })
+    }
+    updates.push(`recipients = $${i++}`); values.push(recipients)
+  }
   if (cron !== undefined) {
     let nextRunAt: Date
     try {

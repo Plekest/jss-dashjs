@@ -2,12 +2,13 @@ import session from 'express-session'
 import connectPgSimple from 'connect-pg-simple'
 import type { Request, Response, NextFunction } from 'express'
 import { pool } from './db.js'
+import { requireSecret } from './env.js'
 
 const PgSession = connectPgSimple(session)
 
 export const sessionMiddleware = session({
   store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET ?? 'dev-insecure-secret',
+  secret: requireSecret('SESSION_SECRET'),
   resave: false,
   saveUninitialized: false,
   rolling: true,

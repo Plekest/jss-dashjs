@@ -31,7 +31,7 @@ export async function runQueryWithCredentials(creds: PostgresCredentials, sql: s
     user: creds.user,
     password: creds.password,
     database: creds.database,
-    ssl: creds.ssl ? { rejectUnauthorized: false } : undefined,
+    ssl: creds.ssl ? { rejectUnauthorized: true } : undefined,
   })
   await client.connect()
   try {

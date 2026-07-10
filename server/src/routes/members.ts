@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import { pool } from '../db.js'
 import { requireAuth, requireRole, type AuthedRequest, type Role } from '../auth.js'
 import { sendInviteEmail } from '../email.js'
+import { isValidEmail } from '../validate.js'
 
 const router = Router()
 const APP_URL = process.env.APP_URL ?? 'http://localhost:5173'
@@ -74,6 +75,7 @@ router.post('/invites', requireRole('owner'), async (req, res) => {
   const { auth } = req as unknown as AuthedRequest
   const { email, role } = req.body as { email?: string; role?: Role }
   if (!email || !role) return res.status(400).json({ error: 'email and role are required' })
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'email is not a valid address' })
 
   const token = randomBytes(24).toString('base64url')
   const { rows: tenantRows } = await pool.query('SELECT name FROM tenants WHERE id = $1', [auth.tenantId])

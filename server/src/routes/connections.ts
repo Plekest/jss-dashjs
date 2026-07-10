@@ -4,6 +4,7 @@ import { encrypt } from '../crypto.js'
 import { runQuery, runQueryAdhoc } from '../queryEngine.js'
 import { insertDataset } from './datasets.js'
 import { requireAuth, requireRole, type AuthedRequest } from '../auth.js'
+import { isBlockedHost } from '../network.js'
 
 const router = Router()
 
@@ -114,10 +115,13 @@ router.post('/', requireRole('owner', 'editor'), async (req, res) => {
 })
 
 // Test credentials without persisting a connection row.
-router.post('/test-adhoc', async (req, res) => {
+router.post('/test-adhoc', requireRole('owner', 'editor'), async (req, res) => {
   const { type, credentials, location } = req.body
   try {
     const parsed = parseCredentials(type, credentials)
+    if (type === 'postgres' && isBlockedHost(String((parsed as { host: string }).host))) {
+      return res.status(400).json({ ok: false, error: 'host not allowed' })
+    }
     await runQueryAdhoc(type, parsed, 'SELECT 1 AS ok', 1, location)
     res.json({ ok: true })
   } catch (err) {
@@ -127,11 +131,14 @@ router.post('/test-adhoc', async (req, res) => {
 })
 
 // Preview a query against not-yet-persisted credentials.
-router.post('/preview-adhoc', async (req, res) => {
+router.post('/preview-adhoc', requireRole('owner', 'editor'), async (req, res) => {
   const { type, credentials, sql, location } = req.body
   if (!sql) return res.status(400).json({ error: 'sql is required' })
   try {
     const parsed = parseCredentials(type, credentials)
+    if (type === 'postgres' && isBlockedHost(String((parsed as { host: string }).host))) {
+      return res.status(400).json({ error: 'host not allowed' })
+    }
     res.json(await runQueryAdhoc(type, parsed, sql, 50, location))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

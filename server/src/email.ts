@@ -6,11 +6,25 @@ import { Resend } from 'resend'
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dev_unset')
 const FROM = process.env.EMAIL_FROM ?? 'JSS Dashjs <onboarding@resend.dev>'
 
+// User-controlled strings (profile name, tenant/alert/dataset/report name...)
+// are interpolated into these templates — escape before building any HTML
+// (spec-security.md Vuln 3).
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 export async function sendInviteEmail(to: string, tenantName: string, inviterName: string, link: string) {
+  const name = escapeHtml(inviterName)
+  const tenant = escapeHtml(tenantName)
   await resend.emails.send({
     from: FROM, to,
     subject: `${inviterName} convidou você para o time "${tenantName}" no JSS Dashjs`,
-    html: `<p>${inviterName} convidou você para colaborar no tenant <b>${tenantName}</b>.</p><p><a href="${link}">Aceitar convite</a></p>`,
+    html: `<p>${name} convidou você para colaborar no tenant <b>${tenant}</b>.</p><p><a href="${link}">Aceitar convite</a></p>`,
   })
 }
 
@@ -26,11 +40,11 @@ export async function sendReportEmail(
   to: string[], reportName: string, dashboardName: string, dashboardLink: string,
   metrics: { label: string; value: number }[],
 ) {
-  const rows = metrics.map((m) => `<tr><td>${m.label}</td><td><b>${m.value}</b></td></tr>`).join('')
+  const rows = metrics.map((m) => `<tr><td>${escapeHtml(m.label)}</td><td><b>${escapeHtml(m.value)}</b></td></tr>`).join('')
   await resend.emails.send({
     from: FROM, to,
     subject: `Relatório "${reportName}" — ${dashboardName}`,
-    html: `<p>Resumo agendado do dashboard <b>${dashboardName}</b>:</p>
+    html: `<p>Resumo agendado do dashboard <b>${escapeHtml(dashboardName)}</b>:</p>
            <table>${rows}</table>
            <p><a href="${dashboardLink}">Abrir dashboard</a></p>`,
   })
@@ -43,7 +57,7 @@ export async function sendAlertEmail(
   await resend.emails.send({
     from: FROM, to,
     subject: `Alerta "${alertName}" disparado — ${datasetName}`,
-    html: `<p>O alerta <b>${alertName}</b> no dataset <b>${datasetName}</b> foi disparado.</p>
-           <p>Valor atual: <b>${value}</b> (limite: ${operator} ${threshold})</p>`,
+    html: `<p>O alerta <b>${escapeHtml(alertName)}</b> no dataset <b>${escapeHtml(datasetName)}</b> foi disparado.</p>
+           <p>Valor atual: <b>${escapeHtml(value)}</b> (limite: ${escapeHtml(operator)} ${escapeHtml(threshold)})</p>`,
   })
 }

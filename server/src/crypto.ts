@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto'
+import { requireSecret } from './env.js'
 
 const KEY = createHash('sha256')
-  .update(process.env.CONNECTIONS_SECRET ?? 'dev-insecure-secret')
+  .update(requireSecret('CONNECTIONS_SECRET'))
   .digest() // 32 bytes
 
 export function encrypt(plain: string): string {
