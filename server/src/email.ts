@@ -18,12 +18,21 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#39;')
 }
 
+// Email headers (subject included) can't contain a line break — a bare
+// `\r`/`\n` in an interpolated value lets an attacker inject extra headers
+// (e.g. `Bcc:`) if the mail provider doesn't sanitize it itself
+// (spec-security.md Vuln 3 follow-up: escapeHtml() alone doesn't cover this
+// since it only runs on `html:`, not `subject:`).
+function sanitizeHeader(value: unknown): string {
+  return String(value).replace(/[\r\n]/g, '')
+}
+
 export async function sendInviteEmail(to: string, tenantName: string, inviterName: string, link: string) {
   const name = escapeHtml(inviterName)
   const tenant = escapeHtml(tenantName)
   await resend.emails.send({
     from: FROM, to,
-    subject: `${inviterName} convidou você para o time "${tenantName}" no JSS Dashjs`,
+    subject: `${sanitizeHeader(inviterName)} convidou você para o time "${sanitizeHeader(tenantName)}" no JSS Dashjs`,
     html: `<p>${name} convidou você para colaborar no tenant <b>${tenant}</b>.</p><p><a href="${link}">Aceitar convite</a></p>`,
   })
 }
@@ -40,10 +49,10 @@ export async function sendReportEmail(
   to: string[], reportName: string, dashboardName: string, dashboardLink: string,
   metrics: { label: string; value: number }[],
 ) {
-  const rows = metrics.map((m) => `<tr><td>${escapeHtml(m.label)}</td><td><b>${escapeHtml(m.value)}</b></td></tr>`).join('')
+  const rows = metrics.map((m) => `<tr><td>${escapeHtml(m.label)}</td><td><b>${m.value}</b></td></tr>`).join('')
   await resend.emails.send({
     from: FROM, to,
-    subject: `Relatório "${reportName}" — ${dashboardName}`,
+    subject: `Relatório "${sanitizeHeader(reportName)}" — ${sanitizeHeader(dashboardName)}`,
     html: `<p>Resumo agendado do dashboard <b>${escapeHtml(dashboardName)}</b>:</p>
            <table>${rows}</table>
            <p><a href="${dashboardLink}">Abrir dashboard</a></p>`,
@@ -56,8 +65,8 @@ export async function sendAlertEmail(
 ) {
   await resend.emails.send({
     from: FROM, to,
-    subject: `Alerta "${alertName}" disparado — ${datasetName}`,
+    subject: `Alerta "${sanitizeHeader(alertName)}" disparado — ${sanitizeHeader(datasetName)}`,
     html: `<p>O alerta <b>${escapeHtml(alertName)}</b> no dataset <b>${escapeHtml(datasetName)}</b> foi disparado.</p>
-           <p>Valor atual: <b>${escapeHtml(value)}</b> (limite: ${escapeHtml(operator)} ${escapeHtml(threshold)})</p>`,
+           <p>Valor atual: <b>${value}</b> (limite: ${escapeHtml(operator)} ${threshold})</p>`,
   })
 }

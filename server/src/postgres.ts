@@ -1,6 +1,7 @@
 import pg from 'pg'
 import { pool } from './db.js'
 import { decrypt } from './crypto.js'
+import { assertHostAllowed } from './network.js'
 
 interface PostgresCredentials {
   host: string
@@ -24,7 +25,18 @@ function coerce(value: unknown): string | number {
   return String(value)
 }
 
+// TLS errors thrown by Node when a Postgres server's certificate isn't
+// trusted (self-signed / private CA) — surfaced as a clear, actionable
+// message instead of a raw Node/OpenSSL exception (spec-security.md Vuln 4
+// follow-up: rejectUnauthorized:true is correct but broke this silently).
+const UNTRUSTED_CERT_RE = /self[- ]signed certificate|unable to verify the first certificate|self signed certificate in certificate chain/i
+
 export async function runQueryWithCredentials(creds: PostgresCredentials, sql: string, maxRows = 50_000) {
+  // Sink-level guard: covers every call path (persisted connections, adhoc
+  // test/preview, scheduled refresh) by construction, instead of relying on
+  // each route handler to remember the check (spec-security.md Vuln 2).
+  await assertHostAllowed(creds.host)
+
   const client = new pg.Client({
     host: creds.host,
     port: creds.port,
@@ -33,7 +45,14 @@ export async function runQueryWithCredentials(creds: PostgresCredentials, sql: s
     database: creds.database,
     ssl: creds.ssl ? { rejectUnauthorized: true } : undefined,
   })
-  await client.connect()
+  try {
+    await client.connect()
+  } catch (err) {
+    if (err instanceof Error && UNTRUSTED_CERT_RE.test(err.message)) {
+      throw new Error('TLS certificate untrusted — disable SSL or contact support to configure a custom CA')
+    }
+    throw err
+  }
   try {
     // Postgres has no client-side "maxResults" like BigQuery — wrap the
     // user's query in a subquery with LIMIT to enforce the same cap,
